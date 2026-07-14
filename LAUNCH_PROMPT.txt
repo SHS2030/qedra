@@ -1,0 +1,7 @@
+Read `AGENTS.md`, `docs/environment.md`, and `docs/GENESIS_MISSION.md` completely.
+
+Execute the QEDRA Genesis Mission as one autonomous engineering assignment. Do not merely propose a plan or stop after scaffolding. Work inside this repository, implement the complete verified vertical slice, execute the tests and demo, repair failures, create coherent milestone commits, and continue until the documented definition of done is met or a genuine external blocker requires my intervention.
+
+You are authorized to create and modify files, install project dependencies with the pinned pnpm toolchain, run local commands, use Docker, run tests, create temporary Git worktrees, and push the current feature branch to its existing GitHub remote. Do not upgrade the verified global toolchain, expose secrets, delete unrelated data, merge into `main`, or perform destructive actions.
+
+Start now by inspecting the repository and environment, then create `docs/genesis-prompt.md` and `docs/genesis-run.md`, record the baseline, and execute the mission phase by phase.
