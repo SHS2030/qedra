@@ -3,8 +3,45 @@
   "version": "0.1.0",
   "private": true,
   "description": "Evidence layer for autonomous software engineering.",
+  "type": "module",
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.13.0",
+  "bin": {
+    "qedra": "dist/packages/cli/src/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node scripts/clean.mjs",
+    "demo": "tsx packages/cli/src/bin.ts demo --replay",
+    "evidence:verify": "tsx packages/cli/src/bin.ts passport --verify --json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "qedra": "tsx packages/cli/src/bin.ts",
+    "test": "vitest run",
+    "test:adversarial": "vitest run tests/adversarial",
+    "test:e2e": "vitest run tests/e2e",
+    "test:integration": "vitest run tests/integration",
+    "test:unit": "vitest run tests/unit",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "0.144.3",
+    "commander": "14.0.2",
+    "fastify": "5.6.2",
+    "yaml": "2.8.1",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@types/node": "24.10.1",
+    "eslint": "9.39.1",
+    "prettier": "3.6.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.1",
+    "vitest": "4.0.18"
+  },
   "engines": {
     "node": ">=24.18.0 <25",
     "pnpm": ">=11.13.0 <12"

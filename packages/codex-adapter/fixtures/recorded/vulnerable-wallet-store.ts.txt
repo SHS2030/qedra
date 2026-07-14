@@ -1,0 +1,23 @@
+import {
+  WalletStore,
+  WalletStoreError,
+  type LedgerEntry,
+  type TransferInput,
+  type TransferResult,
+} from "../../../packages/core/src/index.js";
+
+export type VulnerableTransferInput = TransferInput;
+export type VulnerableTransferResult = TransferResult;
+export type VulnerableLedgerEntry = LedgerEntry;
+export { WalletStoreError as VulnerableWalletError };
+
+/**
+ * Candidate repair recorded for deterministic judge replay. The public fixture
+ * name remains stable while its implementation delegates to the persistent,
+ * unique, atomic idempotency store.
+ */
+export class VulnerableWalletStore extends WalletStore {
+  public constructor(databasePath = ":memory:") {
+    super(databasePath);
+  }
+}

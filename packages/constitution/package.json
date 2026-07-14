@@ -1,0 +1,14 @@
+{
+  "name": "@qedra/constitution",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "yaml": "2.8.1",
+    "zod": "4.1.12"
+  }
+}

@@ -1,0 +1,26 @@
+schemaVersion: 1.0.0
+name: QEDRA Constitution
+description: Non-negotiable software laws enforced by deterministic attacks and verification.
+invariants:
+  - id: TRANSFER_IDEMPOTENCY
+    version: 1
+    title: Transfer idempotency
+    statement: The same transfer request must never debit a wallet more than once, including after a network timeout, client retry, duplicate callback, or concurrent duplicate request.
+    severity: critical
+    enabled: true
+    tags:
+      - payments
+      - idempotency
+      - ledger
+    scenario:
+      id: timeout-after-commit-retry
+      deterministicSeed: qedra-transfer-idempotency-v1
+      description: Commit TX-001, lose the response, and retry the exact request with the same idempotency key.
+      attackCommand: pnpm qedra attack TRANSFER_IDEMPOTENCY --json
+      verificationCommand: pnpm qedra verify TRANSFER_IDEMPOTENCY --json
+      timeoutMs: 30000
+      expectedState:
+        sourceBalance: 9000
+        destinationBalance: 6000
+        debitEntries: 1
+        creditEntries: 1

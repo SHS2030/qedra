@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createVulnerableWalletApi } from "../src/index.js";
+import {
+  createFastifyInjectTarget,
+  runTransferIdempotencyAttack,
+} from "../../../packages/scenario-engine/src/index.js";
+import { verifyTransferIdempotencyScenario } from "../../../packages/verification-engine/src/index.js";
+
+const RECORDED_ATTACK_HASH =
+  "52240dad2107f6ec731d0a0e8fc8b99392b7d7ea52245c0b7c40ec9599e7dc11";
+
+test("TRANSFER_IDEMPOTENCY survives the exact timeout-after-commit retry", async () => {
+  const app = createVulnerableWalletApi();
+  try {
+    const scenario = await runTransferIdempotencyAttack(
+      createFastifyInjectTarget(app, "repaired-wallet"),
+    );
+    const verification = verifyTransferIdempotencyScenario(scenario);
+
+    assert.equal(scenario.attackRequestHash, RECORDED_ATTACK_HASH);
+    assert.equal(verification.status, "PASSED");
+    assert.equal(verification.actual.balances.A, 9_000);
+    assert.equal(verification.actual.balances.B, 6_000);
+    assert.equal(verification.actual.debitEntries, 1);
+    assert.equal(verification.actual.creditEntries, 1);
+  } finally {
+    await app.close();
+  }
+});

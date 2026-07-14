@@ -1,0 +1,170 @@
+name: QEDRA CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_live_codex:
+        description: Run the bounded live Codex repair job (requires repository secret)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qedra-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic-validation:
+    name: Deterministic proof and evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.0
+          run_install: false
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Report toolchain
+        run: |
+          node --version
+          pnpm --version
+          git --version
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Strict type-check
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+      - name: Adversarial tests
+        run: pnpm test:adversarial
+
+      - name: CLI end-to-end tests
+        run: pnpm test:e2e
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Deterministic credential-free demo
+        run: pnpm demo
+
+      - name: Verify evidence schemas and hashes
+        run: pnpm evidence:verify
+
+      - name: Review generated Git status
+        run: git status --short
+
+      - name: Upload deterministic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qedra-deterministic-evidence-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            evidence/*.json
+            evidence/*.html
+            evidence/*.diff
+            apps/evidence-dashboard/public/data.json
+            apps/evidence-dashboard/public/index.html
+            reports/**
+
+  live-codex-repair:
+    name: Live Codex repair (manual opt-in)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_codex == true }}
+    needs: deterministic-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: codex-live-repair
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.0
+          run_install: false
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Require explicit authentication
+        shell: bash
+        run: |
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+            echo "::error::OPENAI_API_KEY is required for the manually enabled live job."
+            exit 1
+          fi
+
+      - name: Confirm live repair readiness without exposing credentials
+        run: pnpm --silent qedra doctor --json
+
+      - name: Generate the expected counterexample
+        shell: bash
+        run: |
+          set +e
+          pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+          status=$?
+          set -e
+          if [[ "$status" -ne 10 ]]; then
+            echo "::error::Expected confirmed violation exit code 10, received $status."
+            exit 1
+          fi
+
+      - name: Run bounded live repair explicitly
+        run: pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --live --json
+
+      - name: Upload live repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qedra-live-repair-evidence-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            evidence/counterexample.json
+            evidence/repair-request.json
+            evidence/repair-report.json
+            evidence/repair.diff

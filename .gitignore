@@ -43,6 +43,23 @@ desktop.ini
 # Runtime evidence generated locally
 reports/runtime/
 evidence/runtime/
+evidence/counterexample.json
+evidence/replay-result.json
+evidence/repair-request.json
+evidence/repair-report.json
+evidence/repair.diff
+evidence/repair-evidence.json
+evidence/recorded-change-set.json
+evidence/verification-result.json
+evidence/live-repair-blocker.json
+evidence/passport.json
+evidence/passport.html
+evidence/dashboard/
+apps/evidence-dashboard/public/data.json
+.qedra/
 tmp/
 temp/
 *.log
+
+# Local bootstrap archive supplied outside the tracked repository
+qedra-genesis-bootstrap.zip

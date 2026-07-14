@@ -15,16 +15,16 @@ The governing files `AGENTS.md`, `docs/environment.md`, and `docs/GENESIS_MISSIO
 
 Observed commands and results:
 
-| Command | Observed result |
-| --- | --- |
-| `node --version` | `v24.18.0` |
-| `npm --version` | `11.16.0` |
-| `pnpm --version` | `11.13.0` |
-| `git --version` | `git version 2.43.0.windows.1` |
-| `gh --version` | `gh version 2.93.0 (2026-05-27)` |
-| `flutter --version` | Flutter `3.44.2` stable; Dart `3.12.2`; DevTools `2.57.0` |
-| `docker version` | Client and Engine `29.0.1`; Docker Desktop daemon reachable |
-| `docker compose version` | `v2.40.3-desktop.1` |
+| Command                                                      | Observed result                                                                                            |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `node --version`                                             | `v24.18.0`                                                                                                 |
+| `npm --version`                                              | `11.16.0`                                                                                                  |
+| `pnpm --version`                                             | `11.13.0`                                                                                                  |
+| `git --version`                                              | `git version 2.43.0.windows.1`                                                                             |
+| `gh --version`                                               | `gh version 2.93.0 (2026-05-27)`                                                                           |
+| `flutter --version`                                          | Flutter `3.44.2` stable; Dart `3.12.2`; DevTools `2.57.0`                                                  |
+| `docker version`                                             | Client and Engine `29.0.1`; Docker Desktop daemon reachable                                                |
+| `docker compose version`                                     | `v2.40.3-desktop.1`                                                                                        |
 | `git -c safe.directory=C:/dev/qedra status --short --branch` | Branch `genesis/qedra-v0.1`, tracking `origin/genesis/qedra-v0.1`; untracked `qedra-genesis-bootstrap.zip` |
 
 Git initially rejected repository access because the working directory owner differs from the process user. This run uses the scoped command option `-c safe.directory=C:/dev/qedra`; global Git configuration was not changed.
@@ -64,3 +64,34 @@ Docker, Flutter, GitHub authentication, and remote access were verified outside 
 - The official Codex manual helper failed before download with `EPERM` while creating its cache under `C:\tmp`. No permission workaround was attempted. The official Codex SDK documentation was instead read from `https://developers.openai.com/codex/sdk`, which documents the server-side `@openai/codex-sdk` TypeScript library, `Codex.startThread()`, thread working-directory controls, structured events, and Node.js 18+ support.
 
 Further milestones append observable commands, failures, repairs, test results, and commits below.
+
+### M1 — Workspace foundation in progress
+
+- Selected exact, conservative dependency versions and added the official `@openai/codex-sdk` package at `0.144.3` after consulting the official SDK documentation and npm registry metadata.
+- Added pnpm workspace configuration, strict TypeScript compilation, ESLint, Prettier, Vitest, production build scripts, and Apache-2.0 metadata.
+- First `pnpm install` resolved and downloaded all packages but exited with `ERR_PNPM_IGNORED_BUILDS` because pnpm requires explicit approval for `esbuild` install scripts. The workspace now allowlists only `esbuild`; no broad lifecycle-script approval was added.
+
+### M2 — Deterministic proof loop and evidence surfaces
+
+- Implemented the strict TypeScript workspace, constitution loader, canonical JSON and SHA-256 primitives, atomic evidence writers, deterministic scenario engine, invariant verifier, proof schemas, and standalone passport renderer.
+- Implemented the deliberately vulnerable SQLite wallet fixture and the corrected wallet store. The canonical timeout-after-commit retry yields A=8,000, B=7,000, two debits, and two credits in the vulnerable fixture; the corrected store yields A=9,000, B=6,000, one debit, and one credit.
+- Implemented persistent idempotency through a unique `request_id`, stored first response, `BEGIN IMMEDIATE`, and one atomic wallet/ledger transaction. Integration coverage includes concurrent duplicates, independent database connections, and reopen persistence.
+- Implemented the official `@openai/codex-sdk` live adapter contract, safe credential-presence detection, isolated worktree runner, attempt/timeout/no-progress/cancellation bounds, allowlisted paths, deterministic change-set replay, preserved diffs, and mandatory human approval. No live call was attempted.
+- Implemented `qedra doctor`, `init`, `verify`, `attack`, `repair`, `passport`, and `demo`, plus the offline evidence dashboard and minimal Flutter client.
+- The first combined unit run exposed five failures caused by restricted temporary-directory and Git ownership assumptions. Tests were moved to repository-local runtime directories and Git commands use scoped `safe.directory`; the corrected unit run passed.
+- Dashboard integration initially failed strict type-checking after the counterexample schema gained `targetId` and `attackRequestHash`. Its fixtures and JSON serialization were corrected without weakening the schema.
+- Global lint then exposed unsafe-value and async-without-await violations that targeted checks had not covered. The implementation was corrected while retaining the full ESLint ruleset.
+
+Observed validation before the repair fixture milestone:
+
+| Command                                                                    | Result                                                                     |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile`                                           | Passed with the pinned lockfile and the explicit `esbuild` build allowlist |
+| `pnpm run format:check`                                                    | Passed                                                                     |
+| `pnpm run typecheck`                                                       | Passed                                                                     |
+| `pnpm run lint`                                                            | Passed                                                                     |
+| `pnpm run test:unit`                                                       | 9 files, 37 tests passed                                                   |
+| `pnpm run build`                                                           | Passed                                                                     |
+| Flutter `dart format`, `flutter analyze --no-pub`, `flutter test --no-pub` | Passed; 4 Flutter tests passed                                             |
+
+The deterministic recorded repair patch and full CLI demo are intentionally validated only after the current source base is committed, because the repair request and change set bind to an exact Git commit.

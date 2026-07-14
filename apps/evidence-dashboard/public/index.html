@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="QEDRA deterministic evidence dashboard">
+  <title>QEDRA Evidence Dashboard</title>
+  <style>
+    :root { color-scheme:dark; --bg:#07110f; --panel:#10241f; --line:#29453d; --ink:#f2f7f3; --muted:#a7bbb2; --mint:#78e5b6; --amber:#f4c95d; --coral:#ff7b70; }
+    * { box-sizing:border-box; }
+    body { min-width:320px; margin:0; background:radial-gradient(circle at 88% 0,rgba(120,229,182,.16),transparent 32rem),linear-gradient(rgba(120,229,182,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(120,229,182,.025) 1px,transparent 1px),var(--bg); background-size:auto,38px 38px,38px 38px,auto; color:var(--ink); font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    .wrap { width:min(1080px,calc(100% - 36px)); margin:auto; }
+    nav { display:flex; justify-content:space-between; gap:20px; border-bottom:1px solid var(--line); padding:24px 0; color:var(--muted); }
+    .brand { color:var(--ink); font-weight:900; letter-spacing:.13em; }
+    header { padding:72px 0 40px; }
+    .eyebrow { color:var(--mint); font-size:.76rem; font-weight:900; letter-spacing:.15em; text-transform:uppercase; }
+    h1 { max-width:800px; margin:16px 0 20px; font-size:clamp(3rem,8vw,6.2rem); letter-spacing:-.065em; line-height:.92; }
+    header p { max-width:720px; color:var(--muted); font-size:1.1rem; }
+    .notice { display:flex; justify-content:space-between; gap:22px; align-items:center; border:1px solid rgba(244,201,93,.55); border-radius:18px; background:linear-gradient(110deg,#352d17,var(--panel)); padding:24px; }
+    .notice p { margin:4px 0 0; color:#d4cba9; }
+    .badge { border:1px solid currentColor; border-radius:999px; padding:5px 10px; color:var(--amber); font:800 .7rem/1 ui-monospace,monospace; letter-spacing:.07em; text-transform:uppercase; white-space:nowrap; }
+    main { padding:20px 0 90px; }
+    h2 { margin:72px 0 8px; font-size:clamp(1.7rem,4vw,2.5rem); letter-spacing:-.035em; }
+    .intro { margin:0 0 24px; color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    article { min-height:150px; border:1px solid var(--line); border-radius:18px; background:linear-gradient(145deg,rgba(21,45,39,.96),rgba(12,29,25,.96)); padding:22px; }
+    article p { color:var(--muted); }
+    code { color:#c8ebdb; overflow-wrap:anywhere; }
+    footer { border-top:1px solid var(--line); padding:28px 0 42px; color:var(--muted); font-size:.8rem; }
+    @media (max-width:680px) { nav span:last-child { display:none; } .notice { align-items:flex-start; flex-direction:column; } .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <nav class="wrap" aria-label="QEDRA evidence header"><span class="brand">QEDRA</span><span>Qualify → Execute → Detect → Repair → Attest</span></nav>
+  <header class="wrap">
+    <p class="eyebrow">Deterministic evidence dashboard</p>
+    <h1>Evidence awaiting generation</h1>
+    <p>This local, dependency-free shell will be replaced with the complete protected law, timeout/retry counterexample, repair evidence, exact replay, and verified passport when the QEDRA demo runs.</p>
+  </header>
+  <main class="wrap">
+    <section class="notice" aria-labelledby="pending-title"><div><strong id="pending-title">No evidence has been fabricated</strong><p>Run <code>pnpm demo</code> to generate <code>index.html</code> and <code>data.json</code> from real QEDRA artifacts.</p></div><span class="badge">Human approval pending</span></section>
+    <section aria-labelledby="proof-title"><h2 id="proof-title">The proof surface</h2><p class="intro">The generated dashboard remains responsive, accessible, and fully usable without a network connection or external script.</p>
+      <div class="grid">
+        <article><h3>Protected law &amp; initial state</h3><p>The invariant and seeded wallet balances establish the non-negotiable baseline.</p></article>
+        <article><h3>Ordered timeout / retry timeline</h3><p>Every canonical HTTP event remains in exact execution order.</p></article>
+        <article><h3>Before / after &amp; repair evidence</h3><p>The confirmed counterexample is compared only with a deterministically verified target.</p></article>
+        <article><h3>Exact replay &amp; passport integrity</h3><p>SHA-256 fingerprints, results, limitations, and approval state make the decision auditable.</p></article>
+      </div>
+    </section>
+  </main>
+  <footer><div class="wrap">QEDRA · Autonomous code must prove itself.</div></footer>
+</body>
+</html>

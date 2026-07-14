@@ -1,0 +1,14 @@
+dist/
+node_modules/
+apps/demo-wallet-flutter/.dart_tool/
+apps/evidence-dashboard/public/
+evidence/*.json
+evidence/*.html
+reports/runtime/
+pnpm-lock.yaml
+qedra-genesis-bootstrap.zip
+
+# Preserve governing documents and the byte-identical mission copy.
+docs/environment.md
+docs/GENESIS_MISSION.md
+docs/genesis-prompt.md
