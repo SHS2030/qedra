@@ -145,4 +145,6 @@ Use English for code, public documentation, README content, CLI output, schemas,
 
 Maintain a concise French summary under `docs/fr/`.
 
+All user-visible communication must be exclusively in French, including progress updates, explanations, authorization requests, error diagnostics, phase summaries, and final reports. Continue to use English for source code, file/class/function/variable names, QEDRA commands and product output, tests, JSON schemas, commit messages, the README and public documentation, and jury-facing deliverables.
+
 At completion, report what was built, what was executed and verified, exact installation and demo commands, remaining limitations, important files, final commit SHA, and readiness against each hackathon criterion.
