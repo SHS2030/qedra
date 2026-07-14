@@ -1,0 +1,12 @@
+{
+  "name": "qedra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Evidence layer for autonomous software engineering.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.13.0",
+  "engines": {
+    "node": ">=24.18.0 <25",
+    "pnpm": ">=11.13.0 <12"
+  }
+}
