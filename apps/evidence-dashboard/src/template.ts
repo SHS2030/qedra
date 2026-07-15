@@ -567,7 +567,7 @@ const SHELL = `<!doctype html>
         ["Branch", data.passport.repository.branch],
         ["Working tree dirty", data.passport.repository.dirty],
         ["Artifact count", data.passport.artifactCount],
-        ["Bundle integrity", data.passport.evidenceBundleIntegrity],
+        ["Referenced bundle verification", data.passport.evidenceBundleIntegrity],
         ["Remote", data.passport.repository.remoteUrl, true]
       ]);
       const limitations = byId("limitations");

@@ -82,7 +82,15 @@ jobs:
         run: pnpm evidence:verify
 
       - name: Review generated Git status
-        run: git status --short
+        shell: bash
+        run: |
+          git status --short
+          git diff --exit-code
+          status="$(git status --porcelain --untracked-files=all)"
+          if [[ -n "$status" ]]; then
+            echo "::error::Deterministic validation left an unexpected Git worktree change."
+            exit 1
+          fi
 
       - name: Upload deterministic evidence
         if: always()
@@ -95,8 +103,7 @@ jobs:
             evidence/*.json
             evidence/*.html
             evidence/*.diff
-            apps/evidence-dashboard/public/data.json
-            apps/evidence-dashboard/public/index.html
+            evidence/dashboard/**
             reports/**
 
   live-codex-repair:

@@ -6,6 +6,8 @@ import {
   detectOpenAiApiKeyPresence,
   REPAIR_REQUEST_SCHEMA_VERSION,
   REPAIR_RESULT_SCHEMA_VERSION,
+  validateRecordedChangeSet,
+  type RecordedChangeSet,
   type RepairRequest,
   type RepairResult,
 } from "../../codex-adapter/src/index.js";
@@ -42,6 +44,7 @@ import {
   REPAIR_DIFF_PATH,
   REPAIR_REPORT_PATH,
   REPAIR_REQUEST_PATH,
+  RECORDED_CHANGE_SET_PATH,
   type RepairExecution,
 } from "./repair.js";
 
@@ -64,10 +67,12 @@ export interface PassportGenerationResult {
   readonly repairEvidence: RepairEvidence;
   readonly replay: ProofLoopRun;
   readonly verification: ProofLoopRun;
+  readonly bundleVerification: PassportVerificationResult;
   readonly paths: {
     readonly json: typeof PASSPORT_JSON_PATH;
     readonly html: typeof PASSPORT_HTML_PATH;
     readonly dashboard: string;
+    readonly liveRepairBlocker: string | null;
   };
 }
 
@@ -83,6 +88,7 @@ export interface PassportVerificationResult {
   readonly evidenceHash: string | null;
   readonly evidenceHashValid: boolean;
   readonly embeddedRepairHashValid: boolean;
+  readonly repairArtifactsValid: boolean;
   readonly passportHtmlMatches: boolean;
   readonly artifactChecks: readonly PassportVerificationCheck[];
   readonly humanApprovalRequired: boolean | null;
@@ -108,17 +114,23 @@ function commandText(command: string, args: readonly string[]): string {
 
 function attemptOutcome(
   result: RepairResult,
+  attempt: RepairResult["attempts"][number],
+  index: number,
 ): "not-run" | "succeeded" | "failed" | "timed-out" | "no-progress" {
-  if (result.status === "SUCCEEDED") {
+  if (attempt.deterministicValidationPassed === true) {
     return "succeeded";
   }
-  if (result.status === "TIMED_OUT") {
+  const isLastAttempt = index === result.attempts.length - 1;
+  if (isLastAttempt && result.status === "TIMED_OUT") {
     return "timed-out";
   }
-  if (result.status === "NO_PROGRESS") {
+  if (isLastAttempt && result.status === "NO_PROGRESS") {
     return "no-progress";
   }
-  return result.attempts.length === 0 ? "not-run" : "failed";
+  if (attempt.invocationStarted === true || result.mode === "record-replay") {
+    return "failed";
+  }
+  return "not-run";
 }
 
 function repairStatus(result: RepairResult): RepairEvidence["status"] {
@@ -147,7 +159,11 @@ async function createRepairEvidenceArtifact(
     REPAIR_REQUEST_PATH,
   );
   const hasDiff = (execution.result.patch?.content.length ?? 0) > 0;
-  const outcome = attemptOutcome(execution.result);
+  const liveInvocationAttempted =
+    execution.request.mode === "live" &&
+    execution.result.attempts.some(
+      (attempt) => attempt.invocationStarted === true,
+    );
   const blocker = authentication.present
     ? (execution.result.blocker?.message ?? null)
     : "OPENAI_API_KEY was not detected; live Codex repair was not invoked.";
@@ -163,10 +179,7 @@ async function createRepairEvidenceArtifact(
     authentication: {
       provider: "official-codex-sdk",
       apiKeyDetected: authentication.present,
-      liveInvocationAttempted:
-        execution.request.mode === "live" &&
-        authentication.present &&
-        execution.result.attempts.length > 0,
+      liveInvocationAttempted,
       blocker,
     },
     limits: {
@@ -179,23 +192,27 @@ async function createRepairEvidenceArtifact(
       worktreePath: ".qedra/worktrees/transfer-idempotency",
       baseCommit: execution.request.repository.baseCommit,
     },
-    attempts: execution.result.attempts.map((attempt) => ({
-      attempt: attempt.attempt,
-      mode: execution.request.mode,
-      startedAt: null,
-      completedAt: null,
-      durationMs: attempt.durationMs,
-      outcome,
-      codexCallId: null,
-      model: null,
-      inputTokens: attempt.tokenUsage?.inputTokens ?? null,
-      outputTokens: attempt.tokenUsage?.outputTokens ?? null,
-      costUsd: null,
-      error:
-        outcome === "succeeded"
-          ? null
-          : (execution.result.blocker?.message ?? null),
-    })),
+    attempts: execution.result.attempts.map((attempt, index) => {
+      const outcome = attemptOutcome(execution.result, attempt, index);
+      return {
+        attempt: attempt.attempt,
+        mode: execution.request.mode,
+        startedAt: null,
+        completedAt: null,
+        durationMs: attempt.durationMs,
+        outcome,
+        codexCallId: null,
+        model: null,
+        inputTokens: attempt.tokenUsage?.inputTokens ?? null,
+        outputTokens: attempt.tokenUsage?.outputTokens ?? null,
+        costUsd: null,
+        error:
+          outcome === "succeeded" || outcome === "not-run"
+            ? null
+            : (execution.result.blocker?.message ??
+              "The attempt did not satisfy deterministic validation."),
+      };
+    }),
     diffArtifact: hasDiff
       ? await artifactReference(repositoryRoot, REPAIR_DIFF_PATH)
       : null,
@@ -300,6 +317,11 @@ export async function generatePassport(
   execution: RepairExecution,
   durationMs: number | null = null,
 ): Promise<PassportGenerationResult> {
+  if (execution.result.status !== "SUCCEEDED") {
+    throw new Error(
+      `A verified passport requires a successful repair; received ${execution.result.status}.`,
+    );
+  }
   const generatedAt = new Date().toISOString();
   const recordedScenario = scenarioRunFromCounterexample(counterexample);
   const replay = await runProofLoop(repositoryRoot, "fixed", recordedScenario);
@@ -352,6 +374,7 @@ export async function generatePassport(
     REPAIR_REQUEST_PATH,
     REPAIR_REPORT_PATH,
     REPAIR_DIFF_PATH,
+    ...(execution.changeSet === undefined ? [] : [RECORDED_CHANGE_SET_PATH]),
     REPAIR_EVIDENCE_PATH,
     REPLAY_RESULT_PATH,
     VERIFICATION_RESULT_PATH,
@@ -365,8 +388,13 @@ export async function generatePassport(
   artifacts.sort((left, right) => left.path.localeCompare(right.path));
   const git = await readGitMetadata(repositoryRoot);
   const validationCount = execution.result.validationResults?.length ?? 0;
-  const codexCalls =
-    execution.result.mode === "live" ? execution.result.attempts.length : 0;
+  const codexCallAttempts =
+    execution.result.mode === "live"
+      ? execution.result.attempts.filter(
+          (attempt) => attempt.invocationStarted === true,
+        )
+      : [];
+  const codexCalls = codexCallAttempts.length;
   const apiKeyDetected = repairEvidence.authentication.apiKeyDetected;
   const limitations = [
     "The candidate repair remains isolated, uncommitted, and unmerged until explicit human approval.",
@@ -436,14 +464,8 @@ export async function generatePassport(
       verificationCommandsExecuted: 3 + validationCount,
       repairAttempts: execution.result.attempts.length,
       codexCalls,
-      inputTokens: aggregateTokenMetric(
-        execution.result.attempts,
-        "inputTokens",
-      ),
-      outputTokens: aggregateTokenMetric(
-        execution.result.attempts,
-        "outputTokens",
-      ),
+      inputTokens: aggregateTokenMetric(codexCallAttempts, "inputTokens"),
+      outputTokens: aggregateTokenMetric(codexCallAttempts, "outputTokens"),
       costUsd: null,
       budgetThresholdUsd: null,
       budgetExceeded: null,
@@ -455,8 +477,19 @@ export async function generatePassport(
     jsonPath: resolve(repositoryRoot, PASSPORT_JSON_PATH),
     htmlPath: resolve(repositoryRoot, PASSPORT_HTML_PATH),
   });
+  const bundleVerification = await verifyPassportBundle(repositoryRoot);
+  if (bundleVerification.status !== "VERIFIED") {
+    throw new Error(
+      "The generated evidence passport or one of its linked repair artifacts failed integrity verification.",
+    );
+  }
   await generateEvidenceDashboard(
-    { counterexample, repair: repairEvidence, passport },
+    {
+      counterexample,
+      repair: repairEvidence,
+      passport,
+      bundleVerification,
+    },
     {
       repositoryRoot,
       outputDirectory: resolve(repositoryRoot, DASHBOARD_OUTPUT_PATH),
@@ -467,24 +500,60 @@ export async function generatePassport(
     repairEvidence,
     replay,
     verification,
+    bundleVerification,
     paths: {
       json: PASSPORT_JSON_PATH,
       html: PASSPORT_HTML_PATH,
       dashboard: `${DASHBOARD_OUTPUT_PATH}/index.html`,
+      liveRepairBlocker: liveBlockerPath,
     },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
+}
+
+function sameStringSet(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  const sortedLeft = [...new Set(left)].sort((a, b) => a.localeCompare(b));
+  const sortedRight = [...new Set(right)].sort((a, b) => a.localeCompare(b));
+  return (
+    sortedLeft.length === sortedRight.length &&
+    sortedLeft.every((item, index) => item === sortedRight[index])
+  );
 }
 
 function assertStoredRepairRequest(
   value: unknown,
 ): asserts value is RepairRequest {
+  const repository = isRecord(value) ? value.repository : null;
+  const scenario = isRecord(value) ? value.scenario : null;
   if (
-    value === null ||
-    typeof value !== "object" ||
-    (value as { schemaVersion?: unknown }).schemaVersion !==
-      REPAIR_REQUEST_SCHEMA_VERSION ||
-    (value as { humanApprovalRequired?: unknown }).humanApprovalRequired !==
-      true
+    !isRecord(value) ||
+    value.schemaVersion !== REPAIR_REQUEST_SCHEMA_VERSION ||
+    value.humanApprovalRequired !== true ||
+    typeof value.requestId !== "string" ||
+    (value.mode !== "live" && value.mode !== "record-replay") ||
+    !isRecord(value.invariant) ||
+    typeof value.invariant.id !== "string" ||
+    typeof value.invariant.statement !== "string" ||
+    !isRecord(scenario) ||
+    typeof scenario.counterexampleArtifactPath !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(String(scenario.counterexampleSha256)) ||
+    !isRecord(repository) ||
+    !/^[0-9a-f]{40,64}$/u.test(String(repository.baseCommit)) ||
+    !isStringArray(repository.affectedFiles) ||
+    !Array.isArray(value.validationCommands) ||
+    !isRecord(value.limits)
   ) {
     throw new Error(
       "The stored repair request does not match the supported contract.",
@@ -496,16 +565,156 @@ function assertStoredRepairResult(
   value: unknown,
 ): asserts value is RepairResult {
   if (
-    value === null ||
-    typeof value !== "object" ||
-    (value as { schemaVersion?: unknown }).schemaVersion !==
-      REPAIR_RESULT_SCHEMA_VERSION ||
-    (value as { humanApprovalRequired?: unknown }).humanApprovalRequired !==
-      true ||
-    (value as { merged?: unknown }).merged !== false
+    !isRecord(value) ||
+    value.schemaVersion !== REPAIR_RESULT_SCHEMA_VERSION ||
+    value.humanApprovalRequired !== true ||
+    value.approvalStatus !== "PENDING" ||
+    value.merged !== false ||
+    value.appliedToSourceRepository !== false ||
+    typeof value.committed !== "boolean" ||
+    typeof value.requestId !== "string" ||
+    (value.mode !== "live" && value.mode !== "record-replay") ||
+    typeof value.status !== "string" ||
+    !Array.isArray(value.attempts)
   ) {
     throw new Error(
       "The stored repair report does not match the supported contract.",
+    );
+  }
+}
+
+function assertStoredChangeSet(
+  value: unknown,
+): asserts value is RecordedChangeSet {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.patch) ||
+    !isStringArray(value.affectedFiles)
+  ) {
+    throw new Error(
+      "The stored recorded change set does not match the supported contract.",
+    );
+  }
+  const errors = validateRecordedChangeSet(
+    value as unknown as RecordedChangeSet,
+  );
+  if (errors.length > 0) {
+    throw new Error(
+      `The stored recorded change set is invalid: ${errors.join("; ")}`,
+    );
+  }
+}
+
+async function assertStoredRepairLinks(
+  repositoryRoot: string,
+  request: RepairRequest,
+  result: RepairResult,
+  changeSet: RecordedChangeSet | undefined,
+): Promise<void> {
+  if (request.requestId !== result.requestId || request.mode !== result.mode) {
+    throw new Error("Stored repair request and report do not belong together.");
+  }
+  const [counterexampleBytes, diffSource] = await Promise.all([
+    readFile(
+      resolve(repositoryRoot, request.scenario.counterexampleArtifactPath),
+    ),
+    readFile(resolve(repositoryRoot, REPAIR_DIFF_PATH), "utf8"),
+  ]);
+  if (
+    sha256Hex(counterexampleBytes) !== request.scenario.counterexampleSha256
+  ) {
+    throw new Error(
+      "The stored repair request counterexample hash is invalid.",
+    );
+  }
+  const counterexample = parseAndVerifyCounterexample(
+    JSON.parse(counterexampleBytes.toString("utf8")) as unknown,
+  );
+  if (
+    counterexample.invariant.id !== request.invariant.id ||
+    counterexample.invariant.statement !== request.invariant.statement ||
+    counterexample.scenario.id !== request.scenario.id ||
+    counterexample.scenario.deterministicSeed !==
+      request.scenario.deterministicSeed ||
+    counterexample.reproductionCommand !==
+      request.scenario.reproductionCommand ||
+    counterexample.repository.commit !== request.repository.baseCommit
+  ) {
+    throw new Error(
+      "The stored repair request is not bound to its counterexample.",
+    );
+  }
+
+  const changedFiles = result.changedFiles ?? [];
+  const allowedFiles = new Set(request.repository.affectedFiles);
+  if (changedFiles.some((path) => !allowedFiles.has(path))) {
+    throw new Error(
+      "The stored repair report contains a file outside the allowlist.",
+    );
+  }
+  if (result.patch !== undefined) {
+    if (
+      sha256Hex(Buffer.from(result.patch.content, "utf8")) !==
+        result.patch.sha256 ||
+      diffSource !== result.patch.content
+    ) {
+      throw new Error(
+        "The stored repair diff does not match the repair report.",
+      );
+    }
+  } else if (result.status === "SUCCEEDED") {
+    throw new Error(
+      "A successful stored repair must contain a captured patch.",
+    );
+  }
+
+  if (result.status === "SUCCEEDED") {
+    const validations = result.validationResults ?? [];
+    if (
+      result.committed ||
+      validations.length !== request.validationCommands.length ||
+      !validations.every((validation, index) => {
+        const declared = request.validationCommands[index];
+        return (
+          declared !== undefined &&
+          validation.id === declared.id &&
+          validation.command === declared.command &&
+          JSON.stringify(validation.args) === JSON.stringify(declared.args) &&
+          validation.passed
+        );
+      })
+    ) {
+      throw new Error(
+        "The successful stored repair does not satisfy its declared validation contract.",
+      );
+    }
+  }
+
+  if (request.mode === "record-replay") {
+    if (changeSet === undefined || result.patch === undefined) {
+      throw new Error(
+        "A recorded repair requires its stored change set and patch.",
+      );
+    }
+    if (
+      changeSet.requestId !== request.requestId ||
+      changeSet.invariantId !== request.invariant.id ||
+      changeSet.baseCommit !== request.repository.baseCommit ||
+      !sameStringSet(
+        changeSet.affectedFiles,
+        request.repository.affectedFiles,
+      ) ||
+      !sameStringSet(changedFiles, changeSet.affectedFiles) ||
+      changeSet.patch.content !== result.patch.content ||
+      changeSet.patch.sha256 !== result.patch.sha256
+    ) {
+      throw new Error(
+        "The stored recorded change set is not bound to its request and result.",
+      );
+    }
+  } else if (changeSet !== undefined) {
+    throw new Error(
+      "A live repair cannot be represented as a recorded change set.",
     );
   }
 }
@@ -521,10 +730,22 @@ export async function readStoredRepairExecution(
   const result: unknown = JSON.parse(resultSource);
   assertStoredRepairRequest(request);
   assertStoredRepairResult(result);
-  if (request.requestId !== result.requestId || request.mode !== result.mode) {
-    throw new Error("Stored repair request and report do not belong together.");
+  let changeSet: RecordedChangeSet | undefined;
+  if (request.mode === "record-replay") {
+    const source = await readFile(
+      resolve(repositoryRoot, RECORDED_CHANGE_SET_PATH),
+      "utf8",
+    );
+    const value: unknown = JSON.parse(source);
+    assertStoredChangeSet(value);
+    changeSet = value;
   }
-  return { request, result };
+  await assertStoredRepairLinks(repositoryRoot, request, result, changeSet);
+  return {
+    request,
+    result,
+    ...(changeSet === undefined ? {} : { changeSet }),
+  };
 }
 
 export async function generatePassportFromStoredArtifacts(
@@ -541,6 +762,12 @@ function validateArtifactDocument(path: string, source: string): boolean {
   const value: unknown = JSON.parse(source);
   if (path === COUNTEREXAMPLE_PATH) {
     parseAndVerifyCounterexample(value);
+  } else if (path === REPAIR_REQUEST_PATH) {
+    assertStoredRepairRequest(value);
+  } else if (path === REPAIR_REPORT_PATH) {
+    assertStoredRepairResult(value);
+  } else if (path === RECORDED_CHANGE_SET_PATH) {
+    assertStoredChangeSet(value);
   } else if (path === REPAIR_EVIDENCE_PATH) {
     parseAndVerifyRepairEvidence(value);
   } else if (
@@ -596,12 +823,32 @@ export async function verifyPassportBundle(
       "utf8",
     );
     const htmlMatches = htmlSource === renderPassportHtml(passport);
-    const allValid = checks.every((check) => check.valid) && htmlMatches;
+    let repairArtifactsValid = false;
+    try {
+      const execution = await readStoredRepairExecution(repositoryRoot);
+      const requiredPaths: string[] = [REPAIR_REQUEST_PATH, REPAIR_REPORT_PATH];
+      if (execution.result.patch !== undefined) {
+        requiredPaths.push(REPAIR_DIFF_PATH);
+      }
+      if (execution.changeSet !== undefined) {
+        requiredPaths.push(RECORDED_CHANGE_SET_PATH);
+      }
+      repairArtifactsValid = requiredPaths.every((path) =>
+        passport.artifacts.some((artifact) => artifact.path === path),
+      );
+    } catch {
+      repairArtifactsValid = false;
+    }
+    const allValid =
+      checks.every((check) => check.valid) &&
+      htmlMatches &&
+      repairArtifactsValid;
     return {
       status: allValid ? "VERIFIED" : "INVALID",
       evidenceHash: passport.evidenceHash,
       evidenceHashValid: verifyEvidenceHash(passport),
       embeddedRepairHashValid: verifyEvidenceHash(passport.repair),
+      repairArtifactsValid,
       passportHtmlMatches: htmlMatches,
       artifactChecks: checks,
       humanApprovalRequired: passport.humanApprovalRequired,
@@ -612,6 +859,7 @@ export async function verifyPassportBundle(
       evidenceHash: null,
       evidenceHashValid: false,
       embeddedRepairHashValid: false,
+      repairArtifactsValid: false,
       passportHtmlMatches: false,
       artifactChecks: [],
       humanApprovalRequired: null,

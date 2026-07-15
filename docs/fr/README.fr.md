@@ -46,18 +46,22 @@ La démonstration génère notamment :
 
 - `evidence/counterexample.json` ;
 - `evidence/repair-request.json` ;
+- `evidence/recorded-change-set.json` ;
 - `evidence/repair-report.json` ;
 - `evidence/repair.diff` ;
+- `evidence/repair-evidence.json` ;
 - `evidence/replay-result.json` ;
+- `evidence/verification-result.json` ;
+- `evidence/live-repair-blocker.json` ;
 - `evidence/passport.json` ;
 - `evidence/passport.html` ;
-- le tableau de bord statique sous `apps/evidence-dashboard/public/`.
+- le tableau de bord statique généré sous `evidence/dashboard/`.
 
 Les schémas sont stricts, les objets et fichiers sont liés par SHA-256, les métriques inconnues restent `null`, et `humanApprovalRequired: true` est obligatoire. Le passeport constitue une aide à la décision, jamais une autorisation de merge.
 
 ## Intégration Codex
 
-Le chemin live utilise le SDK officiel `@openai/codex-sdk`. Il impose un worktree isolé, une liste de fichiers autorisés, trois tentatives au maximum, 120 secondes par tentative, un arrêt après deux constats sans progrès, l’annulation, une validation déterministe et l’absence de commit ou merge automatique.
+Le chemin live utilise le SDK officiel `@openai/codex-sdk`. Il impose un worktree isolé, une liste de fichiers autorisés, trois tentatives au maximum, 120 secondes par tentative, un arrêt après deux constats sans progrès, l’annulation, une validation déterministe, le rejet d’un commit candidat et l’absence de merge automatique.
 
 Aucune clé `OPENAI_API_KEY` n’a été fournie pour la mission Genesis. Aucun appel live, résultat Codex, modèle, volume de tokens ou coût n’est donc revendiqué. QEDRA détecte uniquement la présence et la source de la clé sans jamais afficher sa valeur. L’absence d’authentification bloque seulement `repair --live` ; toutes les phases déterministes continuent.
 

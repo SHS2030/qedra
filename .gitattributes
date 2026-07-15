@@ -1,0 +1,6 @@
+# Recorded Git patches are byte-sensitive evidence and must remain LF-only.
+*.patch text eol=lf whitespace=-blank-at-eol
+
+# Preserve the byte-identical Genesis mission copy across platforms.
+docs/GENESIS_MISSION.md text eol=lf
+docs/genesis-prompt.md text eol=lf

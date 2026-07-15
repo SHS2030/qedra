@@ -7,12 +7,15 @@ import {
   LiveCodexRepairAdapter,
   replayRecordedChangeSet,
   type RecordedChangeSet,
+  type RepairBlocker,
   type RepairRequest,
   type RepairResult,
+  type RepairStatus,
 } from "../../codex-adapter/src/index.js";
 import {
   GitWorktreeRunner,
   NodeProcessRunner,
+  type IsolatedWorktreeResult,
   type ValidationCommand,
   type WorktreeMutationContext,
 } from "../../git-adapter/src/index.js";
@@ -21,6 +24,7 @@ import {
   atomicWriteJson,
   atomicWriteText,
   readGitMetadata,
+  sha256Hex,
 } from "../../shared/src/index.js";
 
 export const REPAIR_REQUEST_PATH = "evidence/repair-request.json" as const;
@@ -34,6 +38,10 @@ const RECORDED_PATCH_PATH =
 const REPAIRED_FILES = [
   "examples/vulnerable-wallet-api/src/vulnerable-wallet-store.ts",
   "examples/vulnerable-wallet-api/tests/transfer-idempotency.regression.test.ts",
+] as const;
+const SENSITIVE_VALIDATION_ENVIRONMENT_VARIABLES = [
+  "OPENAI_API_KEY",
+  "CODEX_API_KEY",
 ] as const;
 
 function validationCommands(): readonly RepairRequest["validationCommands"][number][] {
@@ -77,6 +85,10 @@ export async function buildRepairRequest(
   if (git.commit === null) {
     throw new Error("A committed Git base is required for an isolated repair.");
   }
+  const counterexampleArtifactPath = "evidence/counterexample.json" as const;
+  const counterexampleSha256 = sha256Hex(
+    await readFile(resolve(repositoryRoot, counterexampleArtifactPath)),
+  );
   return {
     schemaVersion: "qedra.repair-request.v1",
     requestId: "REPAIR-TRANSFER_IDEMPOTENCY-001",
@@ -85,8 +97,8 @@ export async function buildRepairRequest(
     scenario: {
       id: counterexample.scenario.id,
       deterministicSeed: counterexample.scenario.deterministicSeed,
-      counterexampleArtifactPath: "evidence/counterexample.json",
-      counterexampleSha256: counterexample.evidenceHash,
+      counterexampleArtifactPath,
+      counterexampleSha256,
       reproductionCommand: counterexample.reproductionCommand,
     },
     repository: {
@@ -148,6 +160,7 @@ export interface RepairExecution {
 export async function executeRecordedRepair(
   repositoryRoot: string,
   counterexample: Counterexample,
+  signal?: AbortSignal,
 ): Promise<RepairExecution> {
   const request = await buildRepairRequest(
     repositoryRoot,
@@ -170,6 +183,7 @@ export async function executeRecordedRepair(
     request,
     changeSet,
     new GitWorktreeRunner(),
+    signal,
   );
   await writeRepairArtifacts(repositoryRoot, request, result, changeSet);
   return { request, result, changeSet };
@@ -188,6 +202,7 @@ async function assessWorkspace(
       args: command.args ?? [],
       cwd: context.workingDirectory,
       timeoutMs: command.timeoutMs ?? 120_000,
+      omitEnvironmentVariables: SENSITIVE_VALIDATION_ENVIRONMENT_VARIABLES,
       ...(signal === undefined ? {} : { signal }),
     });
     passed &&= result.exitCode === 0 && !result.timedOut && !result.cancelled;
@@ -196,6 +211,139 @@ async function assessWorkspace(
     ...(signal === undefined ? {} : { signal }),
   });
   return { passed, fingerprint: diff.stdout };
+}
+
+interface LiveWorktreeFailure {
+  readonly status: RepairStatus;
+  readonly blocker: RepairBlocker;
+}
+
+function liveWorktreeFailure(
+  request: RepairRequest,
+  worktree: IsolatedWorktreeResult<RepairResult>,
+  liveStatus: RepairStatus,
+): LiveWorktreeFailure | null {
+  const failure = (
+    status: RepairStatus,
+    kind: RepairBlocker["kind"],
+    message: string,
+  ): LiveWorktreeFailure => ({
+    status,
+    blocker: { kind, code: status, message },
+  });
+  if (worktree.baseCommit !== request.repository.baseCommit) {
+    return failure(
+      "ISOLATION_REQUIRED",
+      "policy",
+      "The live repair worktree base commit did not match the repair request.",
+    );
+  }
+  if (worktree.committed) {
+    return failure(
+      "CHANGE_SET_REJECTED",
+      "policy",
+      "The live repair created a commit; QEDRA repairs must remain uncommitted for human review.",
+    );
+  }
+  const allowedFiles = new Set(request.repository.affectedFiles);
+  const disallowedFiles = worktree.changedFiles.filter(
+    (path) => !allowedFiles.has(path),
+  );
+  if (disallowedFiles.length > 0) {
+    return failure(
+      "CHANGE_SET_REJECTED",
+      "policy",
+      `The live repair changed files outside the allowlist: ${disallowedFiles.join(", ")}.`,
+    );
+  }
+  if (!worktree.cleanup.succeeded) {
+    return failure(
+      "CHANGE_SET_REJECTED",
+      "execution",
+      "The live repair worktree could not be cleaned up safely.",
+    );
+  }
+  if (liveStatus !== "SUCCEEDED") {
+    return null;
+  }
+  switch (worktree.status) {
+    case "PASSED":
+      if (
+        worktree.validationResults.length !==
+          request.validationCommands.length ||
+        !worktree.validationResults.every((validation) => validation.passed)
+      ) {
+        return failure(
+          "VALIDATION_FAILED",
+          "execution",
+          "The live repair did not complete every deterministic validation command.",
+        );
+      }
+      return null;
+    case "VALIDATION_FAILED":
+      return failure(
+        "VALIDATION_FAILED",
+        "execution",
+        "The live repair failed deterministic worktree validation.",
+      );
+    case "NO_CHANGES":
+      return failure(
+        "NO_PROGRESS",
+        "execution",
+        "The live repair produced no reviewable change.",
+      );
+    case "CANCELLED":
+      return failure(
+        "CANCELLED",
+        "execution",
+        "The live repair was cancelled.",
+      );
+    case "TIMED_OUT":
+      return failure("TIMED_OUT", "execution", "The live repair timed out.");
+    case "POLICY_VIOLATION":
+      return failure(
+        "CHANGE_SET_REJECTED",
+        "policy",
+        worktree.error ?? "The live repair violated the worktree policy.",
+      );
+    case "MUTATION_FAILED":
+      return failure(
+        "LIVE_EXECUTION_FAILED",
+        "execution",
+        worktree.error ?? "The live repair mutation failed.",
+      );
+    case "SETUP_FAILED":
+      return failure(
+        "ISOLATION_REQUIRED",
+        "execution",
+        worktree.error ?? "The live repair worktree could not be created.",
+      );
+  }
+}
+
+export function finalizeLiveRepairResult(
+  request: RepairRequest,
+  live: RepairResult,
+  worktree: IsolatedWorktreeResult<RepairResult>,
+): RepairResult {
+  const worktreeFailure = liveWorktreeFailure(request, worktree, live.status);
+  return {
+    ...live,
+    ...(worktreeFailure === null
+      ? {}
+      : {
+          status: worktreeFailure.status,
+          blocker: worktreeFailure.blocker,
+        }),
+    ...(worktree.patch.length === 0
+      ? {}
+      : { patch: { content: worktree.patch, sha256: worktree.patchSha256 } }),
+    changedFiles: worktree.changedFiles,
+    validationResults: worktree.validationResults,
+    committed: worktree.committed,
+    merged: false,
+    appliedToSourceRepository: false,
+  };
 }
 
 export async function executeLiveRepair(
@@ -227,16 +375,18 @@ export async function executeLiveRepair(
   }
 
   const runner = new GitWorktreeRunner();
+  let attemptedLiveResult: RepairResult | undefined;
   const worktree = await runner.run(
     {
       repositoryPath: repositoryRoot,
       worktreePath: request.repository.isolatedWorktreePath,
       baseRef: request.repository.baseRef,
-      validationCommands: [],
+      validationCommands: request.validationCommands,
+      stopValidationOnFailure: true,
       ...(signal === undefined ? {} : { signal }),
     },
-    async (context) =>
-      await adapter.execute(request, {
+    async (context) => {
+      const candidate = await adapter.execute(request, {
         workingDirectory: context.workingDirectory,
         ...(signal === undefined ? {} : { signal }),
         assessWorkspace: async (_workingDirectory, assessmentSignal) =>
@@ -245,20 +395,21 @@ export async function executeLiveRepair(
             request.validationCommands,
             assessmentSignal,
           ),
-      }),
+      });
+      attemptedLiveResult = candidate;
+      if (candidate.status !== "SUCCEEDED") {
+        throw new Error(
+          `The bounded live repair stopped with status ${candidate.status}.`,
+        );
+      }
+      return candidate;
+    },
   );
-  const live = worktree.mutationOutput;
+  const live = worktree.mutationOutput ?? attemptedLiveResult;
   if (live === undefined) {
     throw new Error(worktree.error ?? "Live repair did not produce a result.");
   }
-  const result: RepairResult = {
-    ...live,
-    ...(worktree.patch.length === 0
-      ? {}
-      : { patch: { content: worktree.patch, sha256: worktree.patchSha256 } }),
-    changedFiles: worktree.changedFiles,
-    validationResults: worktree.validationResults,
-  };
+  const result = finalizeLiveRepairResult(request, live, worktree);
   await writeRepairArtifacts(repositoryRoot, request, result);
   return { request, result };
 }

@@ -20,10 +20,12 @@ pnpm evidence:verify
 | `repair.diff`              | Exact candidate diff captured from the isolated worktree                                          |
 | `repair-evidence.json`     | Schema-validated repair evidence referenced by the passport                                       |
 | `replay-result.json`       | Exact-request replay result and deterministic verification                                        |
+| `verification-result.json` | Fresh corrected-target verification result                                                        |
+| `live-repair-blocker.json` | Explicit credential blocker when live repair is unavailable                                       |
 | `passport.json`            | Canonical machine-verifiable evidence passport                                                    |
 | `passport.html`            | Standalone, dependency-free human review view                                                     |
 
-Additional generated dashboard artifacts live under `apps/evidence-dashboard/public/`.
+Additional generated dashboard artifacts live under `evidence/dashboard/`.
 
 ## Integrity
 

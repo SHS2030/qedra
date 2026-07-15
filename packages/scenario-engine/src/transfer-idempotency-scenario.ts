@@ -98,6 +98,11 @@ async function executeRequests(
       throw new Error(`Missing scenario request at index ${index}.`);
     }
     const response = await target.execute(request);
+    if (response.statusCode !== step.expectedStatusCode) {
+      throw new Error(
+        `Scenario step ${step.name} expected HTTP ${String(step.expectedStatusCode)} but received ${String(response.statusCode)}.`,
+      );
+    }
     events.push({
       sequence: index + 1,
       name: step.name,

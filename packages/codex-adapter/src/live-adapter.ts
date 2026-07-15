@@ -465,6 +465,7 @@ export class LiveCodexRepairAdapter {
         const evidence: RepairAttemptEvidence = {
           attempt,
           durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          invocationStarted: true,
           ...(thread.id === null ? {} : { threadId: thread.id }),
         };
         attempts.push(evidence);
@@ -483,6 +484,7 @@ export class LiveCodexRepairAdapter {
         attempts.push({
           attempt,
           durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          invocationStarted: true,
           ...(thread.id === null ? {} : { threadId: thread.id }),
           ...(tokenUsage === undefined ? {} : { tokenUsage }),
         });
@@ -494,6 +496,14 @@ export class LiveCodexRepairAdapter {
           context.signal,
         );
       } catch {
+        const tokenUsage = mapUsage(turn.usage);
+        attempts.push({
+          attempt,
+          durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          invocationStarted: true,
+          ...(thread.id === null ? {} : { threadId: thread.id }),
+          ...(tokenUsage === undefined ? {} : { tokenUsage }),
+        });
         return result(
           request,
           "VALIDATION_FAILED",
@@ -510,6 +520,7 @@ export class LiveCodexRepairAdapter {
       attempts.push({
         attempt,
         durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+        invocationStarted: true,
         ...(thread.id === null ? {} : { threadId: thread.id }),
         progressFingerprint: assessment.fingerprint,
         deterministicValidationPassed: assessment.passed,

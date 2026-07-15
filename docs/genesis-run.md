@@ -95,3 +95,79 @@ Observed validation before the repair fixture milestone:
 | Flutter `dart format`, `flutter analyze --no-pub`, `flutter test --no-pub` | Passed; 4 Flutter tests passed                                             |
 
 The deterministic recorded repair patch and full CLI demo are intentionally validated only after the current source base is committed, because the repair request and change set bind to an exact Git commit.
+
+### M3 — Interruption recovery and isolated repair completion
+
+The network interruption ended the previous agent stream without proving that its last operations completed. Recovery preserved all existing work and re-established the following baseline before further implementation:
+
+- reread `AGENTS.md`, `docs/environment.md`, `docs/GENESIS_MISSION.md`, and this ledger completely;
+- confirmed branch `genesis/qedra-v0.1`, HEAD `371fb6c688232b62de81475e383de7df9c69752f`, and two local commits ahead of the remote;
+- reviewed `git status`, `git diff --stat`, recent history, the current worktree list, generated artifacts, and every sub-agent deliverable;
+- confirmed that only the repository root worktree remained registered and no Git, pnpm, Flutter, or Dart process from the interrupted run remained;
+- observed unrelated Node processes owned by the desktop execution environment; Windows denied `Win32_Process` command-line inspection, so no process was terminated on inference alone;
+- repeated the silent authentication check and confirmed that neither the environment nor ignored local env files contained a usable `OPENAI_API_KEY`;
+- reran strict type-check, lint, unit, integration, adversarial, build, direct attack, fixed verification, doctor, Flutter analyze, and Flutter tests rather than trusting prior output.
+
+The recovered commit history was:
+
+| Commit    | Milestone                                    |
+| --------- | -------------------------------------------- |
+| `59598ce` | `docs: record Genesis baseline`              |
+| `371fb6c` | `feat: build deterministic QEDRA proof loop` |
+
+The repair fixture was recorded from an isolated worktree against `371fb6c`. It changes only the declared vulnerable store and generated non-regression test. The canonical LF-only patch is 12,197 bytes with SHA-256 `db2e067804d6f2becd34ed7f66e43c5784cc6ffdaca7dd409132049f00d3cefe`. `.gitattributes` preserves byte-sensitive patch and mission line endings.
+
+The deterministic repair replay then:
+
+- applied the exact patch in `.qedra/worktrees/transfer-idempotency`;
+- passed the generated timeout/retry non-regression test;
+- passed the exact attack verifier against the repaired vulnerable target;
+- captured the same patch hash and exact two-file change list;
+- reported `committed: false`, `merged: false`, and `appliedToSourceRepository: false`;
+- removed and pruned the temporary worktree;
+- left the source fixture and source HEAD unchanged.
+
+The CLI E2E suite added direct child-process coverage for help, version, stable exits `0/10/20/30/40`, clean JSON output, credential non-disclosure, vulnerable and fixed state, explicit live authentication blocking, repair replay, demo, JSON/HTML passports, dashboard output, and referenced-file tamper rejection.
+
+Recovery failures and corrections:
+
+- `pnpm exec prettier` was not resolved by pnpm on the first targeted invocation even though the pinned local binary existed. The repository `pnpm format` script was used and `pnpm format:check` passed.
+- Parallel Flutter commands in the restricted sandbox contended on the shared SDK cache. Sequential authorized commands completed: `dart format` changed zero files, `flutter analyze --no-pub` found no issues, and `flutter test --no-pub` passed four tests.
+- An E2E replay in the restricted sandbox could not write Git worktree metadata and correctly returned `CHANGE_SET_REJECTED`. The same unchanged suite was rerun through the authorized Git boundary and passed; no product assertion was weakened.
+
+### M4 — Final audit hardening
+
+A read-only mission audit identified several gaps before final attestation. The implementation was corrected as follows:
+
+- aligned the constitution scenario ID, deterministic seed, attack command, verification command, and exact HTTP status expectations with the canonical attack;
+- made `qedra demo` verify the newly generated passport bundle before reporting `PASSED`;
+- made `--live` and `--replay` mutually exclusive and propagated `SIGINT`/`SIGTERM` cancellation through repair and demo operations;
+- enforced live worktree base, commit, allowlist, cleanup, and complete validation policy without overwriting genuine SDK authentication, timeout, cancellation, or no-progress statuses;
+- counted a Codex call only after `thread.run()` actually started and derived per-attempt outcomes from observed attempt data;
+- computed the repair request counterexample SHA-256 over the actual artifact bytes rather than substituting its internal evidence hash;
+- removed `OPENAI_API_KEY` and `CODEX_API_KEY` from every deterministic validation child environment and added a sentinel non-transmission test;
+- added `recorded-change-set.json` to the passport artifact hash chain and added an E2E mutation/restoration check;
+- made standalone `qedra passport` reload and semantically link the counterexample, repair request, repair result, captured diff, validations, allowlist, base commit, and recorded change set before regeneration;
+- made the dashboard consume the full passport verifier result and display referenced-artifact checks instead of inferring bundle integrity from embedded objects alone;
+- made a successful live demo omit the credential-blocker path when no blocker artifact exists;
+- made CI fail on tracked or untracked post-demo changes and kept the live job manual, secret-protected, and disabled by default;
+- corrected dashboard paths, pending-approval language, Git-policy guarantees, test coverage claims, Flutter scope, and the generated-artifact inventory in public documentation.
+
+Observed focused and category results after these fixes:
+
+| Command                                                                                | Result                                    |
+| -------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `pnpm format:check`                                                                    | Passed                                    |
+| `pnpm lint`                                                                            | Passed                                    |
+| `pnpm typecheck`                                                                       | Passed                                    |
+| Focused constitution, scenario, live-policy, SDK, worktree, credential-isolation tests | 25 tests passed in the latest focused run |
+| `pnpm test:unit` before the credential-isolation addition                              | 10 files, 47 tests passed                 |
+| `pnpm test:integration`                                                                | 1 file, 4 tests passed                    |
+| `pnpm test:adversarial`                                                                | 1 file, 3 tests passed                    |
+| `pnpm test:e2e` after hash-chain and tamper coverage                                   | 1 file, 4 end-to-end scenarios passed     |
+
+The strengthened E2E scenario also regenerated the passport from stored artifacts, retained all 10 referenced artifacts, rejected a byte-modified `recorded-change-set.json` with exit `30`, restored the original bytes, and returned to `VERIFIED`.
+
+No live SDK request was made. Model identity, call IDs, token usage, and monetary cost remain unobserved and are not populated. The external live-authentication blocker remains current while all deterministic phases continue.
+
+The final clean-commit gates, regenerated evidence SHA, GitHub push, and remote CI result are recorded only after they are freshly executed below.

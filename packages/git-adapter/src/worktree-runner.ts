@@ -30,6 +30,11 @@ const FORBIDDEN_MUTATION_GIT_COMMANDS = new Set([
   "worktree",
 ]);
 
+const SENSITIVE_VALIDATION_ENVIRONMENT_VARIABLES = [
+  "OPENAI_API_KEY",
+  "CODEX_API_KEY",
+] as const;
+
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -225,6 +230,10 @@ export class GitWorktreeRunner {
               ? {}
               : { timeoutMs: command.timeoutMs }),
             ...(command.env === undefined ? {} : { env: command.env }),
+            omitEnvironmentVariables: [
+              ...SENSITIVE_VALIDATION_ENVIRONMENT_VARIABLES,
+              ...(command.omitEnvironmentVariables ?? []),
+            ],
             ...(request.signal === undefined ? {} : { signal: request.signal }),
           });
           const passed =

@@ -201,6 +201,7 @@ describe("LiveCodexRepairAdapter", () => {
     expect(result.status).toBe("SUCCEEDED");
     expect(result.attempts).toHaveLength(1);
     expect(result.attempts[0]).toMatchObject({
+      invocationStarted: true,
       threadId: "thread-fixture",
       progressFingerprint: "after",
       deterministicValidationPassed: true,
@@ -264,6 +265,103 @@ describe("LiveCodexRepairAdapter", () => {
 
     expect(result.status).toBe("TIMED_OUT");
     expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.invocationStarted).toBe(true);
+  });
+
+  it("cancels a running SDK attempt through the external signal", async () => {
+    const paths = await isolatedPaths();
+    const controller = new AbortController();
+    const client = new FakeClient(
+      async (_prompt, signal) =>
+        await new Promise<CodexRunResultPort>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(
+                signal.reason instanceof Error
+                  ? signal.reason
+                  : new Error("The test repair attempt was cancelled"),
+              );
+            },
+            { once: true },
+          );
+          queueMicrotask(() => controller.abort());
+        }),
+    );
+    const adapter = new LiveCodexRepairAdapter({
+      environment: { OPENAI_API_KEY: "unit-test-key-never-logged" },
+      clientFactory: () => client,
+    });
+
+    const result = await adapter.execute(
+      request(paths.repository, paths.worktree),
+      {
+        workingDirectory: paths.worktree,
+        signal: controller.signal,
+        assessWorkspace: assessmentSequence([
+          { passed: false, fingerprint: "before" },
+        ]),
+      },
+    );
+
+    expect(result.status).toBe("CANCELLED");
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.invocationStarted).toBe(true);
+  });
+
+  it("preserves an SDK authentication rejection after an invocation starts", async () => {
+    const paths = await isolatedPaths();
+    const client = new FakeClient(() =>
+      Promise.reject(new Error("401 Unauthorized: invalid API key")),
+    );
+    const adapter = new LiveCodexRepairAdapter({
+      environment: { OPENAI_API_KEY: "unit-test-key-never-logged" },
+      clientFactory: () => client,
+    });
+
+    const result = await adapter.execute(
+      request(paths.repository, paths.worktree),
+      {
+        workingDirectory: paths.worktree,
+        assessWorkspace: assessmentSequence([
+          { passed: false, fingerprint: "before" },
+        ]),
+      },
+    );
+
+    expect(result.status).toBe("AUTHENTICATION_REQUIRED");
+    expect(result.blocker).toMatchObject({
+      kind: "external",
+      code: "AUTHENTICATION_REQUIRED",
+    });
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.invocationStarted).toBe(true);
+  });
+
+  it("does not count a thread-construction failure as an SDK invocation", async () => {
+    const paths = await isolatedPaths();
+    const adapter = new LiveCodexRepairAdapter({
+      environment: { OPENAI_API_KEY: "unit-test-key-never-logged" },
+      clientFactory: () => ({
+        startThread: () => {
+          throw new Error("SDK thread setup failed");
+        },
+      }),
+    });
+
+    const result = await adapter.execute(
+      request(paths.repository, paths.worktree),
+      {
+        workingDirectory: paths.worktree,
+        assessWorkspace: assessmentSequence([
+          { passed: false, fingerprint: "before" },
+        ]),
+      },
+    );
+
+    expect(result.status).toBe("LIVE_EXECUTION_FAILED");
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.invocationStarted).toBeUndefined();
   });
 
   it("stops after the bounded no-progress threshold", async () => {

@@ -19,6 +19,7 @@ import {
   initConstitution,
   loadConstitution,
 } from "../../packages/constitution/src/index.js";
+import { TRANSFER_IDEMPOTENCY_ATTACK } from "../../packages/scenario-engine/src/index.js";
 
 const temporaryRoots: string[] = [];
 
@@ -45,6 +46,13 @@ describe("QEDRA constitution", () => {
 
     expect(invariant.severity).toBe("critical");
     expect(invariant.enabled).toBe(true);
+    expect(invariant.scenario.id).toBe(TRANSFER_IDEMPOTENCY_ATTACK.scenarioId);
+    expect(invariant.scenario.deterministicSeed).toBe(
+      TRANSFER_IDEMPOTENCY_ATTACK.deterministicSeed,
+    );
+    expect(invariant.statement).toBe(
+      TRANSFER_IDEMPOTENCY_ATTACK.invariantStatement,
+    );
     expect(invariant.scenario.expectedState).toEqual({
       sourceBalance: 9_000,
       destinationBalance: 6_000,

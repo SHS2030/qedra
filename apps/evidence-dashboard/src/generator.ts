@@ -12,10 +12,21 @@ import { dashboardShell } from "./template.js";
 
 export const DASHBOARD_SCHEMA_VERSION = "qedra.evidence-dashboard.v1" as const;
 
+export interface DashboardBundleVerification {
+  readonly status: "VERIFIED" | "INVALID";
+  readonly artifactChecks: readonly {
+    readonly path: string;
+    readonly expectedSha256: string;
+    readonly actualSha256: string | null;
+    readonly valid: boolean;
+  }[];
+}
+
 export interface DashboardArtifacts {
   readonly counterexample: Counterexample;
   readonly repair: RepairEvidence;
   readonly passport: Passport;
+  readonly bundleVerification?: DashboardBundleVerification;
 }
 
 export interface DashboardGenerationOptions {
@@ -101,7 +112,7 @@ export interface DashboardData {
   readonly passport: {
     readonly evidenceHash: string;
     readonly integrity: "VERIFIED" | "INVALID";
-    readonly evidenceBundleIntegrity: "VERIFIED" | "INVALID";
+    readonly evidenceBundleIntegrity: "VERIFIED" | "INVALID" | "NOT_RUN";
     readonly checks: readonly DashboardIntegrityCheck[];
     readonly artifactCount: number;
     readonly repository: Passport["repository"];
@@ -437,11 +448,17 @@ export function buildDashboardData(
 ): DashboardData {
   const { counterexample, repair, passport } = artifacts;
   const recomputedRequestHash = exactRequestHash(counterexample);
-  const checks = integrityChecks(artifacts);
-  const embeddedRepairValid = checks[2]?.valid === true;
-  const passportHashValid = checks[4]?.valid === true;
+  const embeddedChecks = integrityChecks(artifacts);
+  const referencedArtifactChecks =
+    artifacts.bundleVerification?.artifactChecks.map((check) => ({
+      label: `Referenced artifact: ${check.path}`,
+      valid: check.valid,
+      hash: check.actualSha256 ?? check.expectedSha256,
+    })) ?? [];
+  const checks = [...embeddedChecks, ...referencedArtifactChecks];
+  const embeddedRepairValid = embeddedChecks[2]?.valid === true;
+  const passportHashValid = embeddedChecks[4]?.valid === true;
   const passportIntegrityValid = embeddedRepairValid && passportHashValid;
-  const bundleIntegrityValid = checks.every((check) => check.valid);
   const replayVerified =
     passport.replay.status === "PASS" &&
     passport.verification.status === "PASS";
@@ -502,7 +519,8 @@ export function buildDashboardData(
     passport: {
       evidenceHash: passport.evidenceHash,
       integrity: passportIntegrityValid ? "VERIFIED" : "INVALID",
-      evidenceBundleIntegrity: bundleIntegrityValid ? "VERIFIED" : "INVALID",
+      evidenceBundleIntegrity:
+        artifacts.bundleVerification?.status ?? "NOT_RUN",
       checks,
       artifactCount: passport.artifacts.length,
       repository: passport.repository,

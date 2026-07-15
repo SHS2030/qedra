@@ -9,6 +9,7 @@ export interface ProcessExecutionRequest {
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;
   readonly env?: Readonly<Record<string, string>>;
+  readonly omitEnvironmentVariables?: readonly string[];
   readonly stdin?: string;
   readonly signal?: AbortSignal;
 }
@@ -35,6 +36,7 @@ export interface ValidationCommand {
   readonly args?: readonly string[];
   readonly timeoutMs?: number;
   readonly env?: Readonly<Record<string, string>>;
+  readonly omitEnvironmentVariables?: readonly string[];
 }
 
 export interface ValidationResult {

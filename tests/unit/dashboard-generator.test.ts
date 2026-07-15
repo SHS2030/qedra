@@ -239,7 +239,20 @@ function makeArtifacts(statement = DEFAULT_STATEMENT): DashboardArtifacts {
     humanApprovalRequired: true,
   });
 
-  return { counterexample, repair, passport };
+  return {
+    counterexample,
+    repair,
+    passport,
+    bundleVerification: {
+      status: "VERIFIED",
+      artifactChecks: passport.artifacts.map((artifact) => ({
+        path: artifact.path,
+        expectedSha256: artifact.sha256,
+        actualSha256: artifact.sha256,
+        valid: true,
+      })),
+    },
+  };
 }
 
 afterEach(async () => {
@@ -279,6 +292,19 @@ describe("evidence dashboard view model", () => {
       required: true,
       status: "PENDING",
     });
+  });
+
+  it("does not claim referenced bundle verification without verifier output", () => {
+    const artifacts = makeArtifacts();
+    const withoutVerification: DashboardArtifacts = {
+      counterexample: artifacts.counterexample,
+      repair: artifacts.repair,
+      passport: artifacts.passport,
+    };
+
+    expect(
+      buildDashboardData(withoutVerification).passport.evidenceBundleIntegrity,
+    ).toBe("NOT_RUN");
   });
 
   it("neutralizes HTML-significant evidence while preserving the JSON value", () => {

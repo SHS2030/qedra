@@ -134,7 +134,7 @@ The Git adapter creates a detached worktree from the recorded base commit. Candi
 
 ### Deterministic record/replay
 
-The credential-free path binds a reviewed patch to its request ID, invariant ID, base commit, affected-file list, and content hash. The patch is applied and validated through the same worktree controls used for live candidates. Record/replay is identified honestly in every artifact; it is never labeled as a live Codex result.
+The credential-free path binds a recorded, hash-bound patch to its request ID, invariant ID, base commit, affected-file list, and content hash. The patch is applied and validated through the same worktree controls used for live candidates. Record/replay is identified honestly in every artifact; it is never labeled as a live Codex result.
 
 ### Live Codex SDK
 
@@ -149,11 +149,16 @@ flowchart LR
     Constitution["Constitution"] --> Counterexample["counterexample.json"]
     Git["Git commit metadata"] --> Counterexample
     Counterexample --> Request["repair-request.json"]
+    ChangeSet["recorded-change-set.json"] --> Report
     Request --> Report["repair-report.json"]
     Patch["repair.diff"] --> Report
     Counterexample --> Replay["replay-result.json"]
+    Counterexample --> Verification["verification-result.json"]
+    Report --> RepairEvidence["repair-evidence.json"]
+    RepairEvidence --> Passport
     Report --> Passport["passport.json"]
     Replay --> Passport
+    Verification --> Passport
     Git --> Passport
     Passport --> Html["passport.html"]
     Passport --> Dashboard["dashboard data.json"]
@@ -170,7 +175,7 @@ SHA-256 detects mutation; it is not a signature. A future design may add workloa
 1. **Human policy boundary:** only a human defines the law, supplies credentials, expands allowed paths, and approves integration.
 2. **Repository boundary:** QEDRA reads the selected repository and writes runtime artifacts only to declared local paths.
 3. **Repair boundary:** untrusted candidate edits run in a temporary Git worktree with bounded commands.
-4. **Credential boundary:** only presence and source are observable; values are never emitted to logs or evidence.
+4. **Credential boundary:** only presence and source are observable in QEDRA output; validation child processes remove API credential variables, and values are never written to evidence.
 5. **Proof boundary:** scenario requests, process exit codes, assertions, stored state, diffs, and hashes are authoritative. Agent text is not.
 6. **Presentation boundary:** the dashboard and HTML passport render evidence but cannot approve or merge a change.
 

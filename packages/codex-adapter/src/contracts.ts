@@ -85,6 +85,7 @@ export interface ObservableTokenUsage {
 export interface RepairAttemptEvidence {
   readonly attempt: number;
   readonly durationMs: number;
+  readonly invocationStarted?: boolean;
   readonly threadId?: string;
   readonly progressFingerprint?: string;
   readonly deterministicValidationPassed?: boolean;

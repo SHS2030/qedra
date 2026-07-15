@@ -50,15 +50,19 @@ pnpm evidence:verify
 
 - `evidence/counterexample.json`
 - `evidence/repair-request.json`
+- `evidence/recorded-change-set.json`
 - `evidence/repair-report.json`
 - `evidence/repair.diff`
+- `evidence/repair-evidence.json`
 - `evidence/replay-result.json`
+- `evidence/verification-result.json`
+- `evidence/live-repair-blocker.json`
 - `evidence/passport.json`
 - `evidence/passport.html`
-- `apps/evidence-dashboard/public/data.json`
-- `apps/evidence-dashboard/public/index.html`
+- `evidence/dashboard/data.json`
+- `evidence/dashboard/index.html`
 
-The repair is evidence for review, not authorization to merge. Every repair result keeps `humanApprovalRequired: true`, `approvalStatus: "PENDING"`, `committed: false`, and `merged: false`.
+The repair is evidence for review, not authorization to merge. The successful Genesis result keeps `humanApprovalRequired: true`, `approvalStatus: "PENDING"`, `committed: false`, and `merged: false`. A candidate that creates a commit is reported with `committed: true` and rejected rather than promoted.
 
 ## Architecture
 
@@ -121,7 +125,7 @@ See [Architecture](docs/architecture.md) for components, trust boundaries, persi
 
 ## Requirements and supported platforms
 
-The verified development baseline is Windows 11 with Node.js 24.18.0, pnpm 11.13.0, Git 2.43.0, Docker Desktop 29.0.1, Flutter 3.44.2, and Dart 3.12.2. The TypeScript proof loop uses standard Node.js and Git primitives and is exercised by CI on GitHub-hosted Linux. Node 24 is required because the wallet uses the built-in `node:sqlite` module.
+The verified development baseline is Windows 11 with Node.js 24.18.0, pnpm 11.13.0, Git 2.43.0, Docker Desktop 29.0.1, Flutter 3.44.2, and Dart 3.12.2. The TypeScript proof loop uses standard Node.js and Git primitives and is configured for CI on GitHub-hosted Linux. Node 24 is required because the wallet uses the built-in `node:sqlite` module.
 
 Do not upgrade the pinned toolchain as part of setup.
 
@@ -181,7 +185,8 @@ invariants:
       including after a network timeout, client retry, duplicate callback,
       or concurrent duplicate request.
     scenario:
-      id: timeout-after-commit-retry
+      id: transfer-timeout-after-commit-retry
+      deterministicSeed: qedra-transfer-idempotency-seed-v1
       expectedState:
         sourceBalance: 9000
         destinationBalance: 6000
@@ -222,7 +227,7 @@ The excerpt omits required fields for readability. The generated artifact is aut
 
 ### Deterministic record/replay
 
-This is the default demo path. QEDRA binds a reviewed recorded change set to the repair request, invariant, affected paths, base commit, and patch hash. It applies that patch only inside a detached temporary worktree, runs the non-regression test and exact-attack verification, captures the resulting diff, and removes the worktree. A path policy rejects traversal, `.git` mutation, unexpected files, mismatched base commits, and tampered patch hashes.
+This is the default demo path. QEDRA binds a recorded, hash-bound change set to the repair request, invariant, affected paths, base commit, and patch hash. It applies that patch only inside a detached temporary worktree, runs the non-regression test and exact-attack verification, captures the resulting diff, and removes the worktree. A path policy rejects traversal, `.git` mutation, unexpected files, mismatched base commits, and tampered patch hashes.
 
 ```powershell
 pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
@@ -232,9 +237,11 @@ pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json
 
 ### Live Codex SDK repair
 
-The live adapter uses the official `@openai/codex-sdk`. It starts each attempt inside the declared isolated worktree with workspace-only writes, no interactive approvals, and network access disabled for the repair sandbox. The request permits at most three attempts, 120 seconds per attempt, and two consecutive no-progress assessments. The adapter also enforces hard upper bounds, cancellation, deterministic post-attempt validation, and no merge or commit.
+The live adapter uses the official `@openai/codex-sdk`. It starts each attempt inside the declared isolated worktree with workspace-only writes, no interactive approvals, and network access disabled for the repair sandbox. The request permits at most three attempts, 120 seconds per attempt, and two consecutive no-progress assessments. The adapter also enforces hard upper bounds, cancellation, deterministic post-attempt validation, rejects a candidate that creates a commit, and never merges or promotes changes automatically.
 
 Live mode is currently **implemented but not executed in the Genesis evidence run** because no `OPENAI_API_KEY` was supplied. QEDRA records this as an external authentication blocker and continues all credential-free phases. It never invents a Codex response, model name, token count, cost, call ID, or success.
+
+The repository integrates a real Codex SDK contract, but the Genesis evidence makes no claim that GPT-5.6—or any other model—was invoked. A model identity is recorded only when it is observable from an authorized live SDK run.
 
 To enable live mode later, provide the key only in the process environment or an ignored `.env.local` file, confirm readiness with `doctor`, then opt in:
 
@@ -245,7 +252,7 @@ pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
 pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --live --json
 ```
 
-QEDRA detects only presence and source; it never prints or stores the value in evidence. Do not commit `.env`, `.env.local`, or credentials. Account setup, key creation, billing, and authorization remain human responsibilities.
+QEDRA detects only presence and source; it never prints or stores the value in evidence. Deterministic validation child processes explicitly remove `OPENAI_API_KEY` and `CODEX_API_KEY` from their environments. Do not commit `.env`, `.env.local`, or credentials. Account setup, key creation, billing, and authorization remain human responsibilities.
 
 See [Codex collaboration](docs/codex-collaboration.md) for the exact trust contract.
 
@@ -303,7 +310,7 @@ See [Testing instructions](docs/testing-instructions.md) for expected outcomes a
 
 - Credentials are presence-checked without disclosure and excluded from evidence.
 - Repair writes are limited to an isolated worktree and declared files.
-- Git history is not rewritten; repairs are neither committed nor merged.
+- Git history changes and commits made by a candidate are detected and rejected; no repair is automatically merged or promoted to the source branch.
 - Commands have timeouts, output limits, cancellation, attempt limits, and no-progress detection.
 - Counterexamples, patches, and passport structures are canonicalized and hashed.
 - Model calls, tokens, costs, and budgets are recorded only when directly observable; otherwise fields remain `null`.
@@ -322,7 +329,7 @@ The community core is Apache-2.0 and includes constitutions, deterministic attac
 - The live Codex path requires explicit `OPENAI_API_KEY` authentication and was not invoked in the credential-free Genesis run.
 - Record/replay demonstrates the same repair boundary and validators, but it is not represented as a live model result.
 - The static dashboard is an evidence viewer, not an approval or merge control plane.
-- The Flutter app is a minimal demo client, not a production wallet.
+- The Flutter package is a tested presentation client without generated platform runners; it is not a hosted application or production wallet.
 - A SHA-256 passport proves artifact integrity and provenance claims within the recorded Git context; it is not a cryptographic signature or remote attestation.
 - Human review remains required before applying any repair to the source branch.
 

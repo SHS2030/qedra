@@ -98,7 +98,9 @@ function passedDemo(
       passportJson: PASSPORT_JSON_PATH,
       passportHtml: PASSPORT_HTML_PATH,
       dashboard: bundle.paths.dashboard,
-      liveRepairBlocker: LIVE_REPAIR_BLOCKER_PATH,
+      ...(bundle.paths.liveRepairBlocker === null
+        ? {}
+        : { liveRepairBlocker: LIVE_REPAIR_BLOCKER_PATH }),
     },
     humanApprovalRequired: true,
     durationMs,
@@ -108,6 +110,7 @@ function passedDemo(
 export async function runDemo(
   repositoryRoot: string,
   mode: "record-replay" | "live" = "record-replay",
+  signal?: AbortSignal,
 ): Promise<DemoResult> {
   const started = performance.now();
   await initConstitution(repositoryRoot);
@@ -125,8 +128,8 @@ export async function runDemo(
 
   const execution =
     mode === "live"
-      ? await executeLiveRepair(repositoryRoot, counterexample)
-      : await executeRecordedRepair(repositoryRoot, counterexample);
+      ? await executeLiveRepair(repositoryRoot, counterexample, signal)
+      : await executeRecordedRepair(repositoryRoot, counterexample, signal);
   if (execution.result.status === "AUTHENTICATION_REQUIRED") {
     return {
       schemaVersion: "1.0.0",
@@ -163,6 +166,9 @@ export async function runDemo(
     execution,
     elapsedBeforePassport,
   );
+  if (bundle.bundleVerification.status !== "VERIFIED") {
+    throw new Error("The generated evidence bundle failed verification.");
+  }
   const durationMs = Math.round((performance.now() - started) * 1000) / 1000;
   return passedDemo(durationMs, counterexample, execution, bundle);
 }

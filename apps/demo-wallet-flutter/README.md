@@ -25,9 +25,11 @@ flutter test --no-pub
 ## Endpoint configuration
 
 The defaults expect vulnerable and corrected wallet APIs on ports 3001 and
-3002, and a served standalone passport on port 4173. When this portable client
-is mounted in a Flutter platform runner, override any endpoint with compile-time
-definitions:
+3002, and a served standalone passport on port 4173. This repository does not
+include generated platform runners or a command that starts those three local
+services, so `flutter run` is not part of the verified Genesis demo. After a
+distributor adds a platform runner and supplies the services, endpoints can be
+overridden with compile-time definitions such as:
 
 ```powershell
 flutter run -d windows `

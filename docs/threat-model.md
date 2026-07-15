@@ -10,10 +10,10 @@ It does not claim to secure a production payment system, a hostile operating-sys
 
 1. A repeated `request_id` cannot cause a second debit in the corrected wallet.
 2. The vulnerable failure remains reproducible without contaminating the corrected implementation.
-3. A candidate repair cannot modify the source branch, Git history, `.git`, or undeclared files.
+3. Candidate edits remain isolated; Git-history changes, `.git` damage, commits, and undeclared-file changes are detected and rejected rather than promoted.
 4. Only deterministic validators can establish repair success.
 5. Evidence mutation is detectable through schemas and SHA-256 hashes.
-6. Credentials and private values do not enter logs, product output, or evidence.
+6. API credential values do not enter QEDRA product output or evidence, and validation children cannot inherit them.
 7. Missing authentication blocks only live repair and cannot cause a fabricated live result.
 8. Human approval remains required before integration.
 
@@ -69,28 +69,28 @@ No candidate edit crosses from the temporary worktree to the source branch autom
 
 ## Threats and controls
 
-| ID  | Threat                                                | Control                                                                                                            | Residual risk                                                               |
-| --- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| T1  | Retry causes duplicate debit                          | Unique `transfers.request_id`, stored response, `BEGIN IMMEDIATE`, atomic balance/ledger/result writes             | A database or runtime defect outside covered scenarios could remain         |
-| T2  | Concurrent duplicate races past deduplication         | Immediate writer transaction plus unique primary key; cross-connection tests                                       | SQLite deployment/filesystem semantics must match supported environments    |
-| T3  | Attack is changed after repair to obtain PASS         | Canonical ordered request hash, scenario/seed/event/status validation, exact replay assertion                      | A bug shared by recorder and verifier could mask change                     |
-| T4  | Counterexample or passport is edited                  | Strict schemas, canonical internal hashes, referenced-file byte hashes                                             | SHA-256 is integrity detection, not signer identity                         |
-| T5  | Agent claims success without a working repair         | Agent text ignored; deterministic validators and exit codes decide                                                 | Validators may be incomplete for laws not yet modeled                       |
-| T6  | Candidate repair escapes repository scope             | Detached worktree, normalized repository-relative paths, affected-file allowlist, `.git` rejection                 | A vulnerability in Git, Node, or path handling could bypass policy          |
-| T7  | Candidate rewrites history, commits, or merges        | Worktree callback exposes bounded Git use; result contract requires no commit/merge; head/base checks and cleanup  | A compromised host process has broader authority than the application model |
-| T8  | Malicious patch differs from reviewed recording       | Patch content SHA-256, request/invariant/base binding, captured-diff equality                                      | Approved recording itself may contain a logical vulnerability               |
-| T9  | Repair process hangs or floods output                 | Per-command timeout, attempt timeout, cancellation, attempt limit, no-progress limit, output truncation            | Child-process termination depends on operating-system behavior              |
-| T10 | API key leaks through diagnostics                     | Presence-only detector, source-only result, private loader, no key in evidence                                     | SDK or host-level tracing outside QEDRA may observe process environment     |
-| T11 | Missing key is hidden by fabricated results           | Structured `AUTHENTICATION_REQUIRED`, no thread start, nullable/absent metrics                                     | Reviewer must distinguish record/replay from live mode                      |
-| T12 | Live model accesses network or asks for approval      | SDK thread uses workspace writes, `approvalPolicy: never`, sandbox network disabled                                | The external service remains a separate trust domain                        |
-| T13 | Prompt injection in repository content expands action | Hard-coded policy prompt, allowed paths, worktree boundary, deterministic validators                               | Model may waste bounded attempts or produce harmful allowed-file edits      |
-| T14 | Evidence HTML executes injected content               | HTML escaping, no external scripts, standalone rendering                                                           | Browser implementation vulnerabilities are out of scope                     |
-| T15 | Dashboard presents stale or inconsistent artifacts    | Schema-validated inputs, integrity checks, request-hash comparison, generated timestamp                            | Static files can be viewed after source/evidence changes unless regenerated |
-| T16 | Default CI leaks or requires secrets                  | Pull-request job has read-only contents permission and no secret dependency; live job is manual and off by default | Third-party actions are supply-chain dependencies                           |
-| T17 | Secret from a fork reaches live CI                    | Live job only on explicit `workflow_dispatch`, repository secret, manual boolean                                   | Authorized maintainer can still opt in incorrectly                          |
-| T18 | Generated evidence or local databases are committed   | `.gitignore`, dedicated `evidence/` and `reports/runtime/`, final Git status review                                | A maintainer can override ignore rules manually                             |
-| T19 | Vulnerable fixture is used as production code         | Separate `examples/vulnerable-wallet-api` location, explicit target flag, documentation                            | Consumers may ignore warnings or copy fixture code                          |
-| T20 | Dependency compromise affects proof                   | Exact lockfile, frozen install, controlled dependency set, CI validation                                           | Locking a compromised version does not make it trustworthy                  |
+| ID  | Threat                                                 | Control                                                                                                            | Residual risk                                                                  |
+| --- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| T1  | Retry causes duplicate debit                           | Unique `transfers.request_id`, stored response, `BEGIN IMMEDIATE`, atomic balance/ledger/result writes             | A database or runtime defect outside covered scenarios could remain            |
+| T2  | Concurrent duplicate races past deduplication          | Immediate writer transaction plus unique primary key; cross-connection tests                                       | SQLite deployment/filesystem semantics must match supported environments       |
+| T3  | Attack is changed after repair to obtain PASS          | Canonical ordered request hash, scenario/seed/event/status validation, exact replay assertion                      | A bug shared by recorder and verifier could mask change                        |
+| T4  | Counterexample or passport is edited                   | Strict schemas, canonical internal hashes, referenced-file byte hashes                                             | SHA-256 is integrity detection, not signer identity                            |
+| T5  | Agent claims success without a working repair          | Agent text ignored; deterministic validators and exit codes decide                                                 | Validators may be incomplete for laws not yet modeled                          |
+| T6  | Candidate repair escapes repository scope              | Detached worktree, normalized repository-relative paths, affected-file allowlist, `.git` rejection                 | A vulnerability in Git, Node, or path handling could bypass policy             |
+| T7  | Candidate rewrites history, commits, or merges         | Worktree callback exposes bounded Git use; result contract requires no commit/merge; head/base checks and cleanup  | A compromised host process has broader authority than the application model    |
+| T8  | Malicious patch differs from reviewed recording        | Patch content SHA-256, request/invariant/base binding, captured-diff equality                                      | Approved recording itself may contain a logical vulnerability                  |
+| T9  | Repair process hangs or floods output                  | Per-command timeout, attempt timeout, cancellation, attempt limit, no-progress limit, output truncation            | Child-process termination depends on operating-system behavior                 |
+| T10 | API key leaks through diagnostics or validation output | Presence-only detector, private loader, validation-child credential removal, no key in evidence                    | SDK or host-level tracing outside QEDRA may observe its controlled environment |
+| T11 | Missing key is hidden by fabricated results            | Structured `AUTHENTICATION_REQUIRED`, no thread start, nullable/absent metrics                                     | Reviewer must distinguish record/replay from live mode                         |
+| T12 | Live model accesses network or asks for approval       | SDK thread uses workspace writes, `approvalPolicy: never`, sandbox network disabled                                | The external service remains a separate trust domain                           |
+| T13 | Prompt injection in repository content expands action  | Hard-coded policy prompt, allowed paths, worktree boundary, deterministic validators                               | Model may waste bounded attempts or produce harmful allowed-file edits         |
+| T14 | Evidence HTML executes injected content                | HTML escaping, no external scripts, standalone rendering                                                           | Browser implementation vulnerabilities are out of scope                        |
+| T15 | Dashboard presents stale or inconsistent artifacts     | Schema-validated inputs, integrity checks, request-hash comparison, generated timestamp                            | Static files can be viewed after source/evidence changes unless regenerated    |
+| T16 | Default CI leaks or requires secrets                   | Pull-request job has read-only contents permission and no secret dependency; live job is manual and off by default | Third-party actions are supply-chain dependencies                              |
+| T17 | Secret from a fork reaches live CI                     | Live job only on explicit `workflow_dispatch`, repository secret, manual boolean                                   | Authorized maintainer can still opt in incorrectly                             |
+| T18 | Generated evidence or local databases are committed    | `.gitignore`, dedicated `evidence/` and `reports/runtime/`, final Git status review                                | A maintainer can override ignore rules manually                                |
+| T19 | Vulnerable fixture is used as production code          | Separate `examples/vulnerable-wallet-api` location, explicit target flag, documentation                            | Consumers may ignore warnings or copy fixture code                             |
+| T20 | Dependency compromise affects proof                    | Exact lockfile, frozen install, controlled dependency set, CI validation                                           | Locking a compromised version does not make it trustworthy                     |
 
 ## Credential lifecycle
 

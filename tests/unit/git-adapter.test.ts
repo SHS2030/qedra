@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   GitWorktreeRunner,
+  NodeProcessRunner,
   prepareProcessInvocation,
   type ProcessExecutionRequest,
   type ProcessExecutionResult,
@@ -209,6 +210,12 @@ describe("GitWorktreeRunner", () => {
     expect(gitCalls.some((call) => call.args?.includes("merge") === true)).toBe(
       false,
     );
+    const validationCall = processRunner.calls.find(
+      (call) => call.command === process.execPath,
+    );
+    expect(validationCall?.omitEnvironmentVariables).toEqual(
+      expect.arrayContaining(["OPENAI_API_KEY", "CODEX_API_KEY"]),
+    );
   });
 
   it("preserves the patch and cleans up after a failed mutation", async () => {
@@ -278,5 +285,33 @@ describe("prepareProcessInvocation", () => {
     expect(() =>
       prepareProcessInvocation("pnpm", ["test", "&", "whoami"], "win32"),
     ).toThrow("unsupported shell characters");
+  });
+});
+
+describe("NodeProcessRunner environment isolation", () => {
+  it("removes API credentials from validation child processes", async () => {
+    const runner = new NodeProcessRunner();
+    const result = await runner.run({
+      command: process.execPath,
+      args: [
+        "-e",
+        "process.stdout.write(String(process.env.OPENAI_API_KEY === undefined && process.env.CODEX_API_KEY === undefined))",
+      ],
+      cwd: process.cwd(),
+      env: {
+        OPENAI_API_KEY: "unit-test-openai-sentinel",
+        CODEX_API_KEY: "unit-test-codex-sentinel",
+      },
+      omitEnvironmentVariables: ["OPENAI_API_KEY", "CODEX_API_KEY"],
+      timeoutMs: 5_000,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      stdout: "true",
+      stderr: "",
+      timedOut: false,
+      cancelled: false,
+    });
   });
 });

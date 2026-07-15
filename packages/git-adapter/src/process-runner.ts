@@ -40,6 +40,20 @@ function appendBounded(
   };
 }
 
+function childEnvironment(
+  overrides: Readonly<Record<string, string>> | undefined,
+  omittedNames: readonly string[],
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...process.env, ...overrides };
+  const omitted = new Set(omittedNames.map((name) => name.toUpperCase()));
+  for (const name of Object.keys(environment)) {
+    if (omitted.has(name.toUpperCase())) {
+      delete environment[name];
+    }
+  }
+  return environment;
+}
+
 export interface ProcessInvocation {
   readonly command: string;
   readonly args: readonly string[];
@@ -115,10 +129,10 @@ export class NodeProcessRunner implements ProcessRunner {
 
       const child = spawn(invocation.command, invocation.args, {
         cwd: request.cwd,
-        env:
-          request.env === undefined
-            ? process.env
-            : { ...process.env, ...request.env },
+        env: childEnvironment(
+          request.env,
+          request.omitEnvironmentVariables ?? [],
+        ),
         shell: false,
         windowsHide: true,
         stdio: [

@@ -55,7 +55,7 @@ QEDRA accepts `OPENAI_API_KEY` from the process environment, `.env.local`, or `.
 - whether a usable value exists;
 - whether the source is the environment or an env file.
 
-It never returns, prints, hashes, logs, or writes the secret to evidence. The private credential loader passes the value only to the SDK client and its controlled child environment. The evidence model stores `apiKeyDetected: true|false`, never the value.
+It never returns, prints, hashes, logs, or writes the secret to evidence. The private credential loader passes the value only to the SDK client and its controlled child environment. Deterministic validation child processes remove both `OPENAI_API_KEY` and `CODEX_API_KEY` before execution. The evidence model stores `apiKeyDetected: true|false`, never the value.
 
 Without a key, `qedra doctor` reports replay readiness and the live blocker. An explicit live repair exits with code `40` and `AUTHENTICATION_REQUIRED` before a Codex thread starts. This blocker is scoped: the constitution, attack, counterexample, recorded repair, replay, verifier, dashboard, and passport continue normally.
 
@@ -101,7 +101,7 @@ The adapter captures command, arguments, exit code, duration, stdout/stderr, tim
 
 ## Deterministic record/replay
 
-Record/replay is the credential-free judge mode, not a simulation of an API response. A reviewed change set is bound to:
+Record/replay is the credential-free judge mode, not a simulation of an API response. A recorded, hash-bound change set is bound to:
 
 - request ID;
 - invariant ID;

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { ObservedWalletState } from "../../packages/scenario-engine/src/index.js";
+import {
+  runTransferIdempotencyAttack,
+  type ObservedWalletState,
+  type ScenarioTarget,
+} from "../../packages/scenario-engine/src/index.js";
 import { evaluateTransferIdempotency } from "../../packages/verification-engine/src/index.js";
 
 const duplicatedState: ObservedWalletState = {
@@ -42,6 +46,27 @@ const duplicatedState: ObservedWalletState = {
 };
 
 describe("TRANSFER_IDEMPOTENCY verification", () => {
+  it("rejects a scenario response that violates the canonical HTTP contract", async () => {
+    let requestIndex = 0;
+    const target: ScenarioTarget = {
+      id: "wrong-timeout-status",
+      execute: () => {
+        requestIndex += 1;
+        return Promise.resolve({
+          statusCode: 200,
+          headers: { "content-type": "application/json" },
+          body: {},
+          bodyText: "{}",
+        });
+      },
+    };
+
+    await expect(runTransferIdempotencyAttack(target)).rejects.toThrow(
+      /TRANSFER_TIMEOUT_AFTER_COMMIT expected HTTP 504 but received 200/u,
+    );
+    expect(requestIndex).toBe(3);
+  });
+
   it("reports the deterministic duplicated debit as FAILED", () => {
     const result = evaluateTransferIdempotency(duplicatedState);
 

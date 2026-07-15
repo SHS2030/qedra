@@ -78,16 +78,16 @@ Coverage includes:
 - secure `OPENAI_API_KEY` presence detection without value disclosure;
 - live adapter authentication, isolation, attempt, timeout, cancellation, and no-progress behavior through test doubles;
 - recorded change-set hash, base-commit, and affected-path validation;
-- process runner and Git worktree policy;
+- process runner, API-credential removal, and Git worktree policy;
 - evidence dashboard data and escaping.
 
 Run one file while diagnosing:
 
 ```powershell
-pnpm exec vitest run tests/unit/passport-foundation.test.ts
-pnpm exec vitest run tests/unit/codex-adapter-live.test.ts
-pnpm exec vitest run tests/unit/git-adapter.test.ts
-pnpm exec vitest run tests/unit/dashboard-generator.test.ts
+pnpm test -- tests/unit/passport-foundation.test.ts
+pnpm test -- tests/unit/codex-adapter-live.test.ts
+pnpm test -- tests/unit/git-adapter.test.ts
+pnpm test -- tests/unit/dashboard-generator.test.ts
 ```
 
 Live adapter unit tests use injected ports; they do not make an API call and must not be described as live model evidence.
@@ -119,7 +119,9 @@ The suite must prove both sides of the law:
 
 1. the preserved vulnerable fixture deterministically reaches A=8,000, B=7,000, two debits, and two credits for `TX-001`, and the verifier returns FAIL;
 2. the corrected implementation receives the same canonical attack and reaches A=9,000, B=6,000, one debit, and one credit, and the verifier returns PASS;
-3. concurrent duplicates cannot create an additional debit.
+3. an altered ordered event definition is rejected before replay.
+
+Cross-connection concurrent duplicates are covered separately by the wallet integration suite.
 
 Do not change the expected vulnerable values or treat the intentional failure as a test harness failure.
 

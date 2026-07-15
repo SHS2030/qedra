@@ -174,6 +174,7 @@ function formatPassportVerification(
     `Evidence hash: ${result.evidenceHash ?? "unavailable"}`,
     `Passport hash: ${result.evidenceHashValid ? "VERIFIED" : "INVALID"}`,
     `Embedded repair hash: ${result.embeddedRepairHashValid ? "VERIFIED" : "INVALID"}`,
+    `Repair artifact links: ${result.repairArtifactsValid ? "VERIFIED" : "INVALID"}`,
     `Standalone HTML: ${result.passportHtmlMatches ? "VERIFIED" : "INVALID"}`,
     `Referenced artifacts: ${String(result.artifactChecks.filter((check) => check.valid).length)} / ${String(result.artifactChecks.length)}`,
     `Human approval required: ${String(result.humanApprovalRequired)}`,
@@ -190,6 +191,23 @@ function displayRecordField(
   return typeof value === "string" || typeof value === "number"
     ? String(value)
     : fallback;
+}
+
+async function withProcessCancellation<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const cancel = (): void => {
+    controller.abort(new Error("QEDRA operation cancelled by the operator."));
+  };
+  process.once("SIGINT", cancel);
+  process.once("SIGTERM", cancel);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    process.removeListener("SIGINT", cancel);
+    process.removeListener("SIGTERM", cancel);
+  }
 }
 
 function formatDemo(result: DemoResult): string {
@@ -363,7 +381,7 @@ export async function runCli(
       "use the official Codex SDK instead of deterministic replay",
       false,
     )
-    .option("--replay", "use the deterministic recorded change set", true)
+    .option("--replay", "use the deterministic recorded change set", false)
     .option("--json", "emit one machine-readable JSON document")
     .action(
       async (
@@ -372,11 +390,20 @@ export async function runCli(
         command: Command,
       ) => {
         requireInvariant(invariant);
+        if (options.live && options.replay) {
+          throw new Error("Choose either --live or --replay, not both.");
+        }
         const repositoryRoot = await findRepositoryRoot();
         const counterexample = await readCounterexample(repositoryRoot);
-        const execution = options.live
-          ? await executeLiveRepair(repositoryRoot, counterexample)
-          : await executeRecordedRepair(repositoryRoot, counterexample);
+        const execution = await withProcessCancellation(async (signal) =>
+          options.live
+            ? await executeLiveRepair(repositoryRoot, counterexample, signal)
+            : await executeRecordedRepair(
+                repositoryRoot,
+                counterexample,
+                signal,
+              ),
+        );
         if (commandJsonOption(command)) {
           writeJson(io, repairOutput(execution));
         } else {
@@ -442,9 +469,13 @@ export async function runCli(
           throw new Error("Choose either --live or --replay, not both.");
         }
         const repositoryRoot = await findRepositoryRoot();
-        const result = await runDemo(
-          repositoryRoot,
-          options.live ? "live" : "record-replay",
+        const result = await withProcessCancellation(
+          async (signal) =>
+            await runDemo(
+              repositoryRoot,
+              options.live ? "live" : "record-replay",
+              signal,
+            ),
         );
         if (commandJsonOption(command)) {
           writeJson(io, result);

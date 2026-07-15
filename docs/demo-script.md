@@ -129,7 +129,7 @@ Start-Process evidence/passport.html
 Optionally open the richer dashboard:
 
 ```powershell
-Start-Process apps/evidence-dashboard/public/index.html
+Start-Process evidence/dashboard/index.html
 ```
 
 > The passport binds stage results, artifacts, hashes, Git metadata, observable metrics, limitations, and reproduction commands. It requires human approval and cannot merge anything.
@@ -164,13 +164,17 @@ After the demo, confirm these files exist:
 ```powershell
 Get-Item evidence/counterexample.json
 Get-Item evidence/repair-request.json
+Get-Item evidence/recorded-change-set.json
 Get-Item evidence/repair-report.json
 Get-Item evidence/repair.diff
+Get-Item evidence/repair-evidence.json
 Get-Item evidence/replay-result.json
+Get-Item evidence/verification-result.json
+Get-Item evidence/live-repair-blocker.json
 Get-Item evidence/passport.json
 Get-Item evidence/passport.html
-Get-Item apps/evidence-dashboard/public/data.json
-Get-Item apps/evidence-dashboard/public/index.html
+Get-Item evidence/dashboard/data.json
+Get-Item evidence/dashboard/index.html
 ```
 
 Then inspect Git status:
