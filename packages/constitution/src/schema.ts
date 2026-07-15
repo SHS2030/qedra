@@ -87,9 +87,9 @@ export const DEFAULT_CONSTITUTION: Constitution = ConstitutionSchema.parse({
         description:
           "Commit TX-001, lose the response, and retry the exact request with the same idempotency key.",
         attackCommand:
-          "pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
+          "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
         verificationCommand:
-          "pnpm --silent qedra verify TRANSFER_IDEMPOTENCY --target fixed --json",
+          "node --import tsx packages/cli/src/bin.ts verify TRANSFER_IDEMPOTENCY --target fixed --json",
         timeoutMs: 30_000,
         expectedState: {
           sourceBalance: 9_000,

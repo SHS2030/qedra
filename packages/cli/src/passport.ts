@@ -452,11 +452,11 @@ export async function generatePassport(
     artifacts,
     reproductionCommands: [
       "pnpm install --frozen-lockfile",
-      "pnpm --silent qedra doctor --json",
-      "pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
-      "pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json",
-      "pnpm --silent qedra demo --replay --json",
-      "pnpm --silent evidence:verify",
+      "node --import tsx packages/cli/src/bin.ts doctor --json",
+      "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
+      "node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json",
+      "node --import tsx packages/cli/src/bin.ts demo --replay --json",
+      "node --import tsx packages/cli/src/bin.ts passport --verify --json",
     ],
     metrics: {
       durationMs,

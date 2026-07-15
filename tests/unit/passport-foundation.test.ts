@@ -86,26 +86,29 @@ function makePassport(): Passport {
     repository,
     qualification: {
       status: "PASS",
-      command: "pnpm qedra init --json",
+      command: "node --import tsx packages/cli/src/bin.ts init --json",
       completedAt: generatedAt,
       artifact: null,
     },
     attack: {
       status: "FAIL",
-      command: "pnpm qedra attack TRANSFER_IDEMPOTENCY --json",
+      command:
+        "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json",
       completedAt: generatedAt,
       artifact: counterexampleReference,
     },
     repair,
     replay: {
       status: "PASS",
-      command: "pnpm qedra attack TRANSFER_IDEMPOTENCY --replay --json",
+      command:
+        "node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json",
       completedAt: generatedAt,
       artifact: null,
     },
     verification: {
       status: "PASS",
-      command: "pnpm qedra verify TRANSFER_IDEMPOTENCY --json",
+      command:
+        "node --import tsx packages/cli/src/bin.ts verify TRANSFER_IDEMPOTENCY --json",
       completedAt: generatedAt,
       artifact: null,
     },
@@ -114,7 +117,9 @@ function makePassport(): Passport {
       repair.requestArtifact,
       repair.diffArtifact!,
     ],
-    reproductionCommands: ["pnpm qedra demo --replay"],
+    reproductionCommands: [
+      "node --import tsx packages/cli/src/bin.ts demo --replay",
+    ],
     metrics: {
       durationMs: 450,
       scenariosExecuted: 2,
@@ -185,7 +190,8 @@ describe("counterexample evidence", () => {
         { requestId: "TX-001", direction: "debit", amount: 1_000 },
       ],
       affectedFiles: ["examples/vulnerable-wallet-api/src/wallet.ts"],
-      reproductionCommand: "pnpm qedra attack TRANSFER_IDEMPOTENCY --json",
+      reproductionCommand:
+        "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json",
       repository,
     });
 

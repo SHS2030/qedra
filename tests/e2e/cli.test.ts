@@ -206,6 +206,18 @@ describe.sequential("QEDRA direct-process CLI", () => {
       creditEntries: 2,
       totalRelevantEntries: 4,
     });
+    const counterexample = asRecord(
+      JSON.parse(
+        await readFile(
+          resolve(REPOSITORY_ROOT, "evidence/counterexample.json"),
+          "utf8",
+        ),
+      ) as unknown,
+      "counterexample",
+    );
+    expect(counterexample.reproductionCommand).toBe(
+      "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
+    );
 
     const verification = await runCli([
       "verify",

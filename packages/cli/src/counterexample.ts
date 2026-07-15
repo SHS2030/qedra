@@ -96,7 +96,7 @@ export async function buildCounterexample(
       "packages/verification-engine/src/transfer-idempotency.ts",
     ],
     reproductionCommand:
-      "pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
+      "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
     repository: {
       commit: git.commit,
       branch: git.branch,

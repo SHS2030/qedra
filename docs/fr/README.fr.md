@@ -37,7 +37,7 @@ Le mode par défaut est un record/replay déterministe. Il applique un patch enr
 La commande ciblée suivante confirme volontairement la violation avec le code de sortie `10` :
 
 ```powershell
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 ```
 
 ## Preuves produites
@@ -69,9 +69,9 @@ Activation ultérieure, sous responsabilité humaine :
 
 ```powershell
 $env:OPENAI_API_KEY = "<your key>"
-pnpm --silent qedra doctor --json
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --live --json
+node --import tsx packages/cli/src/bin.ts doctor --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --live --json
 ```
 
 La création de clé, la facturation, les droits d’accès et l’approbation finale restent des décisions humaines.

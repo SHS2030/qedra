@@ -119,7 +119,7 @@ function makeArtifacts(statement = DEFAULT_STATEMENT): DashboardArtifacts {
       "packages/core/src/wallet-store.ts",
     ],
     reproductionCommand:
-      "pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
+      "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
     repository: REPOSITORY,
   });
 
@@ -191,7 +191,7 @@ function makeArtifacts(statement = DEFAULT_STATEMENT): DashboardArtifacts {
     repository: REPOSITORY,
     qualification: {
       status: "PASS",
-      command: "pnpm qedra init --json",
+      command: "node --import tsx packages/cli/src/bin.ts init --json",
       completedAt: GENERATED_AT,
       artifact: null,
     },
@@ -204,13 +204,15 @@ function makeArtifacts(statement = DEFAULT_STATEMENT): DashboardArtifacts {
     repair,
     replay: {
       status: "PASS",
-      command: "pnpm qedra attack TRANSFER_IDEMPOTENCY --replay --json",
+      command:
+        "node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json",
       completedAt: GENERATED_AT,
       artifact: replayArtifact,
     },
     verification: {
       status: "PASS",
-      command: "pnpm qedra verify TRANSFER_IDEMPOTENCY --json",
+      command:
+        "node --import tsx packages/cli/src/bin.ts verify TRANSFER_IDEMPOTENCY --json",
       completedAt: GENERATED_AT,
       artifact: replayArtifact,
     },
@@ -220,7 +222,9 @@ function makeArtifacts(statement = DEFAULT_STATEMENT): DashboardArtifacts {
       repair.diffArtifact!,
       replayArtifact,
     ],
-    reproductionCommands: ["pnpm qedra demo --replay"],
+    reproductionCommands: [
+      "node --import tsx packages/cli/src/bin.ts demo --replay",
+    ],
     metrics: {
       durationMs: 450,
       scenariosExecuted: 2,

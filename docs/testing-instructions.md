@@ -155,7 +155,7 @@ node dist/packages/cli/src/bin.js verify TRANSFER_IDEMPOTENCY --target fixed --j
 Run the vulnerable attack separately:
 
 ```powershell
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 $LASTEXITCODE
 ```
 
@@ -175,7 +175,7 @@ The command must write `evidence/counterexample.json`. Its `reproductionCommand`
 ## Correct implementation verification
 
 ```powershell
-pnpm --silent qedra verify TRANSFER_IDEMPOTENCY --target fixed --json
+node --import tsx packages/cli/src/bin.ts verify TRANSFER_IDEMPOTENCY --target fixed --json
 $LASTEXITCODE
 ```
 
@@ -195,13 +195,13 @@ Invariant: PASSED
 The record/replay repair requires a committed Git base because its patch and temporary worktree bind to that commit.
 
 ```powershell
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 if ($LASTEXITCODE -ne 10) { throw "Expected violation was not confirmed" }
 
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json
 if ($LASTEXITCODE -ne 0) { throw "Recorded repair did not validate" }
 
-pnpm --silent qedra demo --replay
+node --import tsx packages/cli/src/bin.ts demo --replay
 if ($LASTEXITCODE -ne 0) { throw "Deterministic demo failed" }
 ```
 
@@ -252,7 +252,7 @@ The live Codex job exists only behind a manual `workflow_dispatch` boolean and t
 Use this order:
 
 1. capture the exact command, exit code, and stderr;
-2. run `pnpm --silent qedra doctor --json` for capability diagnostics;
+2. run `node --import tsx packages/cli/src/bin.ts doctor --json` for capability diagnostics;
 3. check pinned tool versions without upgrading them;
 4. run the narrowest relevant test file;
 5. inspect generated evidence without editing it;

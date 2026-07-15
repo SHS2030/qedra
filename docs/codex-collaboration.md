@@ -119,9 +119,9 @@ QEDRA applies it through the same Git worktree and validation boundary. Result a
 Run the vulnerable attack first, then record/replay repair:
 
 ```powershell
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 # Expected exit: 10
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json
 ```
 
 Review:
@@ -142,7 +142,7 @@ For a temporary PowerShell session:
 
 ```powershell
 $env:OPENAI_API_KEY = "<your key>"
-pnpm --silent qedra doctor --json
+node --import tsx packages/cli/src/bin.ts doctor --json
 ```
 
 Alternatively, use an ignored `.env.local` file:
@@ -154,9 +154,9 @@ OPENAI_API_KEY=<your key>
 Confirm that `doctor` reports `READY_FOR_LIVE_REPAIR`, then create a fresh counterexample and opt in explicitly:
 
 ```powershell
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 # Confirm expected exit 10.
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --live --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --live --json
 ```
 
 Never pass a key as a CLI argument, echo it, include it in captured output, commit an env file, or upload it with evidence. Remove the session variable when finished:

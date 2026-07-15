@@ -146,13 +146,13 @@ jobs:
           fi
 
       - name: Confirm live repair readiness without exposing credentials
-        run: pnpm --silent qedra doctor --json
+        run: node --import tsx packages/cli/src/bin.ts doctor --json
 
       - name: Generate the expected counterexample
         shell: bash
         run: |
           set +e
-          pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+          node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
           status=$?
           set -e
           if [[ "$status" -ne 10 ]]; then
@@ -161,7 +161,7 @@ jobs:
           fi
 
       - name: Run bounded live repair explicitly
-        run: pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --live --json
+        run: node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --live --json
 
       - name: Upload live repair evidence
         if: always()

@@ -171,3 +171,36 @@ The strengthened E2E scenario also regenerated the passport from stored artifact
 No live SDK request was made. Model identity, call IDs, token usage, and monetary cost remain unobserved and are not populated. The external live-authentication blocker remains current while all deterministic phases continue.
 
 The final clean-commit gates, regenerated evidence SHA, GitHub push, and remote CI result are recorded only after they are freshly executed below.
+
+### M5 — Reproducible command provenance and complete local gates
+
+The isolated repair and attestation hardening was committed as `55eb9395f072dfe332826b3bbd37fd18ba6c462f` (`feat: complete isolated repair attestation`). A final command-provenance audit then found two test fixtures that described the nonexistent command `attack --replay`; they were corrected to use `repair --replay`.
+
+The first shell-level observation of the intentional attack reported a generic process status `1`. The native PowerShell status was then measured explicitly rather than inferred: both the direct Node.js entry point and `pnpm --silent qedra` returned QEDRA exit code `10`. The generic status came from the surrounding command host. Evidence and documentation now standardize on `node --import tsx packages/cli/src/bin.ts ...` as the explicit source-checkout reproduction entry point, while documenting the equivalent built and installed entry points. The E2E suite asserts the exact command stored in the counterexample.
+
+`qedra doctor` also exposed a cold-start diagnostic issue: the installed Flutter tool exceeded the generic five-second probe and was reported unavailable even though its standalone gates passed. Only the optional Flutter probe was raised to 15 seconds, timeout detection now checks the actual `ETIMEDOUT` error code, and the repeated diagnostic reported Flutter `3.44.2` correctly. Flutter remains optional for core replay and is not installed by default CI.
+
+Fresh local validation after these corrections produced the following observable results:
+
+| Command or check                                                        | Result                                                                                                               |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile`                                        | Passed; all 12 workspace projects already matched the pinned lockfile                                                |
+| `pnpm format:check`                                                     | Passed                                                                                                               |
+| `pnpm lint`                                                             | Passed                                                                                                               |
+| `pnpm typecheck`                                                        | Passed                                                                                                               |
+| `pnpm test:unit`                                                        | 10 files, 50 tests passed                                                                                            |
+| `pnpm test:integration`                                                 | 1 file, 4 tests passed                                                                                               |
+| `pnpm test:adversarial`                                                 | 1 file, 3 tests passed                                                                                               |
+| `pnpm test:e2e`                                                         | 1 file, 4 end-to-end scenarios passed                                                                                |
+| `pnpm build`                                                            | Passed                                                                                                               |
+| Built CLI `--version`, vulnerable attack, and fixed verification        | Version `0.1.0`; native exits `0`, `10`, and `0`; exact vulnerable and corrected balances observed                   |
+| Flutter format, `flutter analyze --no-pub`, and `flutter test --no-pub` | 6 files formatted with 0 changes; no analysis issues; 4 tests passed                                                 |
+| `pnpm demo`                                                             | Passed the complete record/replay flow; attack failed as expected, repair succeeded, replay and verification passed  |
+| `pnpm evidence:verify`                                                  | `VERIFIED`; evidence hash, embedded repair hash, semantic repair artifacts, HTML, and all 10 referenced files passed |
+| `node --import tsx packages/cli/src/bin.ts doctor --json`               | `READY_FOR_REPLAY`; pinned Node, pnpm, Git, Docker, Flutter, and Codex SDK detected; live authentication absent      |
+| GitHub Actions YAML parse                                               | Passed; deterministic and manual live jobs present                                                                   |
+| Mission/prompt byte comparison                                          | Identical; SHA-256 `4d4445161169f97489a4dbbdafd5a6eca8457ceb5e962dad9437eccc713422df`                                |
+| Recorded patch byte check                                               | 12,197 LF-only bytes; SHA-256 `db2e067804d6f2becd34ed7f66e43c5784cc6ffdaca7dd409132049f00d3cefe`                     |
+| Tracked credential and likely-secret scan                               | 0 sensitive credential files and 0 likely secret-bearing files                                                       |
+
+The evidence hash observed during this dirty pre-commit gate is intentionally provisional. The complete demo and hash verification must run again after the final source/documentation commit so the generated counterexample and passport bind to a clean final HEAD. No API key was added, no live SDK call was attempted, and no Codex identity, call, token, or cost metric was invented.

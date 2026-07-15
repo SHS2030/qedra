@@ -28,7 +28,7 @@ pnpm demo
 Equivalent explicit command:
 
 ```powershell
-pnpm --silent qedra demo --replay
+node --import tsx packages/cli/src/bin.ts demo --replay
 ```
 
 The command must finish successfully only after it has:
@@ -60,7 +60,7 @@ Open `constitutions/qedra.yaml`.
 Show the attack section of the demo output or run the focused command:
 
 ```powershell
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 $LASTEXITCODE
 ```
 
@@ -77,7 +77,7 @@ Expected exit code: `10`, meaning a confirmed invariant violation. Point to:
 ### 1:00–1:45 — The bounded repair
 
 ```powershell
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json
 ```
 
 Open `evidence/repair-request.json` and `evidence/repair.diff`.
@@ -105,7 +105,7 @@ Show the replay section of the demo output and the before/after comparison:
 ### 2:15–2:40 — Codex integration honesty
 
 ```powershell
-pnpm --silent qedra doctor --json
+node --import tsx packages/cli/src/bin.ts doctor --json
 ```
 
 Show `READY_FOR_REPLAY`, the installed official SDK, and `openaiAuthentication.present: false` when no key exists.
@@ -139,20 +139,20 @@ Start-Process evidence/dashboard/index.html
 Use this sequence when demonstrating each command independently:
 
 ```powershell
-pnpm --silent qedra doctor --json
-pnpm --silent qedra init --json
+node --import tsx packages/cli/src/bin.ts doctor --json
+node --import tsx packages/cli/src/bin.ts init --json
 
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 if ($LASTEXITCODE -ne 10) { throw "Expected confirmed violation exit code 10" }
 
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json
 if ($LASTEXITCODE -ne 0) { throw "Recorded repair validation failed" }
 
-pnpm --silent qedra verify TRANSFER_IDEMPOTENCY --target fixed --json
+node --import tsx packages/cli/src/bin.ts verify TRANSFER_IDEMPOTENCY --target fixed --json
 if ($LASTEXITCODE -ne 0) { throw "Correct implementation did not verify" }
 
-pnpm --silent qedra passport --json
-pnpm --silent qedra passport --verify --json
+node --import tsx packages/cli/src/bin.ts passport --json
+node --import tsx packages/cli/src/bin.ts passport --verify --json
 ```
 
 The complete `demo --replay` command is preferable because it also performs the exact recorded-request replay and assembles the final evidence bundle in one orchestration.
@@ -191,10 +191,10 @@ Live mode requires deliberate human authorization, an API key, and an account wi
 
 ```powershell
 $env:OPENAI_API_KEY = "<your key>"
-pnpm --silent qedra doctor --json
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts doctor --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 # Confirm exit code 10, then explicitly opt in:
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --live --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --live --json
 ```
 
 Expected safety properties remain the same: isolated worktree, explicit affected files, at most three attempts, 120-second attempt timeout, two-attempt no-progress stop, cancellation support, deterministic validation, pending human approval, no commit, and no merge.
@@ -204,7 +204,7 @@ Never show a key on screen, add it to a command argument, place it in evidence, 
 ## Recovery if a command fails
 
 1. Preserve the command, exit code, and error output.
-2. Run `pnpm --silent qedra doctor --json`.
+2. Run `node --import tsx packages/cli/src/bin.ts doctor --json`.
 3. Confirm the pinned versions in `docs/environment.md`.
 4. Run the focused test category from `docs/testing-instructions.md`.
 5. Fix the root cause; do not relax an invariant or expected state.

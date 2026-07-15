@@ -36,7 +36,11 @@ function firstLine(value: string | undefined): string | null {
   return line ? line : null;
 }
 
-function inspectTool(command: string, args: readonly string[]): ToolDiagnostic {
+function inspectTool(
+  command: string,
+  args: readonly string[],
+  timeoutMs = 5_000,
+): ToolDiagnostic {
   const executable =
     process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : command;
   const executableArgs =
@@ -45,16 +49,20 @@ function inspectTool(command: string, args: readonly string[]): ToolDiagnostic {
       : [...args];
   const result = spawnSync(executable, executableArgs, {
     encoding: "utf8",
-    timeout: 5_000,
+    timeout: timeoutMs,
     windowsHide: true,
   });
 
   if (result.error) {
-    const timedOut = result.error.name === "ETIMEDOUT";
+    const timedOut =
+      result.error.name === "ETIMEDOUT" ||
+      (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
     return {
       available: false,
       version: null,
-      detail: timedOut ? "timed out after 5000ms" : result.error.message,
+      detail: timedOut
+        ? `timed out after ${String(timeoutMs)}ms`
+        : result.error.message,
     };
   }
 
@@ -87,7 +95,7 @@ export async function runDoctor(repositoryRoot: string): Promise<DoctorReport> {
   const pnpm = inspectTool("pnpm", ["--version"]);
   const git = inspectTool("git", ["--version"]);
   const docker = inspectTool("docker", ["--version"]);
-  const flutter = inspectTool("flutter", ["--version"]);
+  const flutter = inspectTool("flutter", ["--version"], 15_000);
 
   let codexSdk: ToolDiagnostic;
   try {

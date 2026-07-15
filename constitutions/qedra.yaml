@@ -16,8 +16,8 @@ invariants:
       id: transfer-timeout-after-commit-retry
       deterministicSeed: qedra-transfer-idempotency-seed-v1
       description: Commit TX-001, lose the response, and retry the exact request with the same idempotency key.
-      attackCommand: pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --target vulnerable --json
-      verificationCommand: pnpm --silent qedra verify TRANSFER_IDEMPOTENCY --target fixed --json
+      attackCommand: node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --target vulnerable --json
+      verificationCommand: node --import tsx packages/cli/src/bin.ts verify TRANSFER_IDEMPOTENCY --target fixed --json
       timeoutMs: 30000
       expectedState:
         sourceBalance: 9000

@@ -148,17 +148,17 @@ qedra passport [--verify]
 qedra demo --replay
 ```
 
-Use `--json` for one machine-readable JSON document. With pnpm, `--silent` prevents the package-runner preamble from contaminating stdout:
+Use `--json` for one machine-readable JSON document. From a source checkout, invoke the Node.js entry point directly to keep the evidence command independent of package-runner formatting and preserve the native QEDRA exit code:
 
 ```powershell
-pnpm --silent qedra doctor --json
-pnpm --silent qedra init --json
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json
-pnpm --silent qedra passport --verify --json
+node --import tsx packages/cli/src/bin.ts doctor --json
+node --import tsx packages/cli/src/bin.ts init --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json
+node --import tsx packages/cli/src/bin.ts passport --verify --json
 ```
 
-The attack command returns exit code `10` when it confirms the violation. That non-zero result is the intended proof outcome, not a harness crash.
+The attack command returns exit code `10` when it confirms the violation. That non-zero result is the intended proof outcome, not a harness crash. `pnpm --silent qedra ...` is an equivalent source runner and also preserves the native code; inspect `$LASTEXITCODE` in PowerShell when a surrounding command host reports a generic non-zero status. After `pnpm build`, the equivalent production entry point is `node dist/packages/cli/src/bin.js`; an installed `qedra` binary preserves the same codes.
 
 | Exit code | Meaning                                            |
 | --------: | -------------------------------------------------- |
@@ -230,9 +230,9 @@ The excerpt omits required fields for readability. The generated artifact is aut
 This is the default demo path. QEDRA binds a recorded, hash-bound change set to the repair request, invariant, affected paths, base commit, and patch hash. It applies that patch only inside a detached temporary worktree, runs the non-regression test and exact-attack verification, captures the resulting diff, and removes the worktree. A path policy rejects traversal, `.git` mutation, unexpected files, mismatched base commits, and tampered patch hashes.
 
 ```powershell
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 # Expected exit code: 10
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --replay --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json
 ```
 
 ### Live Codex SDK repair
@@ -247,9 +247,9 @@ To enable live mode later, provide the key only in the process environment or an
 
 ```powershell
 $env:OPENAI_API_KEY = "<your key>"
-pnpm --silent qedra doctor --json
-pnpm --silent qedra attack TRANSFER_IDEMPOTENCY --json
-pnpm --silent qedra repair TRANSFER_IDEMPOTENCY --live --json
+node --import tsx packages/cli/src/bin.ts doctor --json
+node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
+node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --live --json
 ```
 
 QEDRA detects only presence and source; it never prints or stores the value in evidence. Deterministic validation child processes explicitly remove `OPENAI_API_KEY` and `CODEX_API_KEY` from their environments. Do not commit `.env`, `.env.local`, or credentials. Account setup, key creation, billing, and authorization remain human responsibilities.

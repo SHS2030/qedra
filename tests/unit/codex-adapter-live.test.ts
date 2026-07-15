@@ -53,7 +53,8 @@ function request(repository: string, worktree: string): RepairRequest {
       deterministicSeed: "TX-001",
       counterexampleArtifactPath: "evidence/counterexample.json",
       counterexampleSha256: "c".repeat(64),
-      reproductionCommand: "pnpm qedra attack TRANSFER_IDEMPOTENCY",
+      reproductionCommand:
+        "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY",
     },
     repository: {
       path: repository,
