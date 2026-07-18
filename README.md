@@ -62,6 +62,8 @@ pnpm evidence:verify
 - `evidence/dashboard/data.json`
 - `evidence/dashboard/index.html`
 
+An explicitly requested live run additionally preserves `evidence/live-repair-request.json`, `evidence/live-repair-report.json`, and `evidence/live-repair.diff`. These diagnostics are separate from the deterministic passport and never contain the API key or raw provider error text.
+
 The repair is evidence for review, not authorization to merge. The successful Genesis result keeps `humanApprovalRequired: true`, `approvalStatus: "PENDING"`, `committed: false`, and `merged: false`. A candidate that creates a commit is reported with `committed: true` and rejected rather than promoted.
 
 ## Architecture

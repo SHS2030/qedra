@@ -172,8 +172,9 @@ function mapStatus(status: IsolatedWorktreeResult["status"]): RepairStatus {
       return "REPLAY_MISMATCH";
     case "POLICY_VIOLATION":
     case "MUTATION_FAILED":
-    case "SETUP_FAILED":
       return "CHANGE_SET_REJECTED";
+    case "SETUP_FAILED":
+      return "ISOLATION_REQUIRED";
   }
 }
 
@@ -189,6 +190,8 @@ function replayMessage(status: RepairStatus): string | undefined {
       return "The isolated replay did not reproduce the exact recorded patch.";
     case "CHANGE_SET_REJECTED":
       return "The recorded change set could not be applied under the isolated repair policy.";
+    case "ISOLATION_REQUIRED":
+      return "The isolated Git worktree could not be created or inspected.";
     default:
       return "The deterministic replay did not complete successfully.";
   }
@@ -292,8 +295,8 @@ export async function replayRecordedChangeSet(
     capturedPathErrors,
   );
   if (
-    capturedPathErrors.length > 0 ||
-    !samePaths(capturedPaths, changeSetPaths)
+    worktree.status !== "SETUP_FAILED" &&
+    (capturedPathErrors.length > 0 || !samePaths(capturedPaths, changeSetPaths))
   ) {
     status = "CHANGE_SET_REJECTED";
     policyMessage =
@@ -317,7 +320,7 @@ export async function replayRecordedChangeSet(
       status === "SUCCEEDED" &&
       worktree.validationResults.every((validation) => validation.passed),
   };
-  const message = policyMessage ?? replayMessage(status);
+  const message = policyMessage ?? worktree.error ?? replayMessage(status);
   return {
     schemaVersion: REPAIR_RESULT_SCHEMA_VERSION,
     requestId: request.requestId,
@@ -328,7 +331,11 @@ export async function replayRecordedChangeSet(
       ? {}
       : {
           blocker: replayBlocker(
-            status === "VALIDATION_FAILED" ? "execution" : "policy",
+            status === "VALIDATION_FAILED"
+              ? "execution"
+              : status === "ISOLATION_REQUIRED"
+                ? "external"
+                : "policy",
             status,
             message,
           ),

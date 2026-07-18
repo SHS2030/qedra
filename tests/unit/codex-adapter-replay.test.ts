@@ -249,4 +249,44 @@ describe("record/replay repair", () => {
     expect(result.blocker?.message).toContain("does not exactly match");
     expect(result.appliedToSourceRepository).toBe(false);
   });
+
+  it("reports an unavailable isolated worktree without masking the setup error", async () => {
+    const runner: GitWorktreeRunnerPort = {
+      run: <T>() =>
+        Promise.resolve({
+          status: "SETUP_FAILED",
+          repositoryPath: "C:\\fixture\\repository",
+          worktreePath: "C:\\fixture\\worktree",
+          baseCommit: BASE_COMMIT,
+          headCommit: null,
+          changedFiles: [],
+          patch: "",
+          patchSha256:
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          validationResults: [],
+          error: "Git worktree creation failed with exit code 128",
+          cleanup: { attempted: false, succeeded: true, pruned: false },
+          humanApprovalRequired: true,
+          approvalStatus: "PENDING",
+          committed: false,
+          merged: false,
+          appliedToSourceRepository: false,
+        } as IsolatedWorktreeResult<T>),
+    };
+
+    const result = await replayRecordedChangeSet(
+      request(),
+      changeSet(),
+      runner,
+    );
+
+    expect(result.status).toBe("ISOLATION_REQUIRED");
+    expect(result.blocker).toEqual({
+      kind: "external",
+      code: "ISOLATION_REQUIRED",
+      message: "Git worktree creation failed with exit code 128",
+    });
+    expect(result.changedFiles).toEqual([]);
+    expect(result.validationResults).toEqual([]);
+  });
 });

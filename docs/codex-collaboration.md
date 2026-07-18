@@ -15,7 +15,7 @@ This distinction applies both to the Genesis engineering work and to QEDRA's pro
 
 The repository was built through an autonomous Codex engineering assignment: repository inspection, architecture decisions, implementation, test execution, failure diagnosis, repairs, documentation, and Git milestones. Observable commands and results belong in `docs/genesis-run.md`; private chain-of-thought does not.
 
-No `OPENAI_API_KEY` was supplied for the product's live repair path. Therefore the Genesis evidence run uses deterministic record/replay and records live authentication as an external blocker. It does not claim a live API call, Codex response, model identity, thread ID, token usage, cost, or live-repair success.
+The Genesis judge evidence remains the deterministic record/replay path. A local ignored `OPENAI_API_KEY` was later configured through the secure OpenAI Platform workflow and detected without exposing its value. A bounded SDK invocation started in an isolated worktree but returned a safely classified `CODEX_UNKNOWN_FAILURE` before validation and without changing files. QEDRA therefore does not claim a Codex response, model identity, token usage, cost, or live-repair success. API billing, quota, project access, and the locked GitHub Actions account remain external until independently resolved and rerun.
 
 QEDRA records an exact model name only when the SDK exposes it as observable run data. The current adapter does not hardcode or infer `GPT-5.6`, so documentation and evidence must not claim a verified GPT-5.6 runtime invocation without corresponding telemetry.
 
@@ -58,6 +58,8 @@ QEDRA accepts `OPENAI_API_KEY` from the process environment, `.env.local`, or `.
 It never returns, prints, hashes, logs, or writes the secret to evidence. The private credential loader passes the value only to the SDK client and its controlled child environment. Deterministic validation child processes remove both `OPENAI_API_KEY` and `CODEX_API_KEY` before execution. The evidence model stores `apiKeyDetected: true|false`, never the value.
 
 Without a key, `qedra doctor` reports replay readiness and the live blocker. An explicit live repair exits with code `40` and `AUTHENTICATION_REQUIRED` before a Codex thread starts. This blocker is scoped: the constitution, attack, counterexample, recorded repair, replay, verifier, dashboard, and passport continue normally.
+
+SDK failures are mapped to fixed, non-secret diagnostics for authentication, insufficient quota, rate limiting, project/model access, transport, local process execution, and unknown failures. Raw provider messages, stderr, stacks, and causes are never copied to evidence. Live runs preserve their latest request, report, and diff under `evidence/live-repair-*`; deterministic demo regeneration cannot overwrite those snapshots.
 
 ## Bounded autonomy
 
@@ -138,6 +140,8 @@ The request artifact is identical in structure for live and recorded paths excep
 
 Key creation, account access, billing, and authorization are human responsibilities. They are deliberately outside QEDRA.
 
+API billing is separate from a ChatGPT subscription. Before expecting a live repair to succeed, activate API billing or prepaid credits for the selected organization, verify the project limits, and wait for the balance to become available. Use the [OpenAI API billing page](https://platform.openai.com/settings/organization/billing) and [organization limits](https://platform.openai.com/settings/organization/limits).
+
 For a temporary PowerShell session:
 
 ```powershell
@@ -164,6 +168,8 @@ Never pass a key as a CLI argument, echo it, include it in captured output, comm
 ```powershell
 Remove-Item Env:OPENAI_API_KEY
 ```
+
+For GitHub Actions, create the protected environment `codex-live-repair`, optionally require a reviewer, and store a dedicated least-privilege CI credential as its `OPENAI_API_KEY` environment secret. Do not reuse the developer's local key. The default pull-request workflow remains credential-free; the live job runs only after explicit `workflow_dispatch` opt-in.
 
 ## Human versus agent authority
 

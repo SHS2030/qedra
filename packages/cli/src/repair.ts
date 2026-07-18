@@ -5,6 +5,7 @@ import {
   createRecordedChangeSet,
   detectOpenAiApiKeyPresence,
   LiveCodexRepairAdapter,
+  openAiEnvFiles,
   replayRecordedChangeSet,
   type RecordedChangeSet,
   type RepairBlocker,
@@ -30,6 +31,11 @@ import {
 export const REPAIR_REQUEST_PATH = "evidence/repair-request.json" as const;
 export const REPAIR_REPORT_PATH = "evidence/repair-report.json" as const;
 export const REPAIR_DIFF_PATH = "evidence/repair.diff" as const;
+export const LIVE_REPAIR_REQUEST_PATH =
+  "evidence/live-repair-request.json" as const;
+export const LIVE_REPAIR_REPORT_PATH =
+  "evidence/live-repair-report.json" as const;
+export const LIVE_REPAIR_DIFF_PATH = "evidence/live-repair.diff" as const;
 export const RECORDED_CHANGE_SET_PATH =
   "evidence/recorded-change-set.json" as const;
 
@@ -43,6 +49,28 @@ const SENSITIVE_VALIDATION_ENVIRONMENT_VARIABLES = [
   "OPENAI_API_KEY",
   "CODEX_API_KEY",
 ] as const;
+
+export interface RepairArtifactPaths {
+  readonly request: string;
+  readonly report: string;
+  readonly diff: string;
+}
+
+export function repairArtifactPaths(
+  mode: RepairRequest["mode"],
+): RepairArtifactPaths {
+  return mode === "live"
+    ? {
+        request: LIVE_REPAIR_REQUEST_PATH,
+        report: LIVE_REPAIR_REPORT_PATH,
+        diff: LIVE_REPAIR_DIFF_PATH,
+      }
+    : {
+        request: REPAIR_REQUEST_PATH,
+        report: REPAIR_REPORT_PATH,
+        diff: REPAIR_DIFF_PATH,
+      };
+}
 
 function validationCommands(): readonly RepairRequest["validationCommands"][number][] {
   return [
@@ -137,12 +165,22 @@ async function writeRepairArtifacts(
   result: RepairResult,
   changeSet?: RecordedChangeSet,
 ): Promise<void> {
-  await atomicWriteJson(resolve(repositoryRoot, REPAIR_REQUEST_PATH), request);
-  await atomicWriteJson(resolve(repositoryRoot, REPAIR_REPORT_PATH), result);
-  await atomicWriteText(
-    resolve(repositoryRoot, REPAIR_DIFF_PATH),
-    result.patch?.content ?? "",
-  );
+  const writeSet = async (paths: RepairArtifactPaths): Promise<void> => {
+    await atomicWriteJson(resolve(repositoryRoot, paths.request), request);
+    await atomicWriteJson(resolve(repositoryRoot, paths.report), result);
+    await atomicWriteText(
+      resolve(repositoryRoot, paths.diff),
+      result.patch?.content ?? "",
+    );
+  };
+  await writeSet({
+    request: REPAIR_REQUEST_PATH,
+    report: REPAIR_REPORT_PATH,
+    diff: REPAIR_DIFF_PATH,
+  });
+  if (request.mode === "live") {
+    await writeSet(repairArtifactPaths("live"));
+  }
   if (changeSet !== undefined) {
     await atomicWriteJson(
       resolve(repositoryRoot, RECORDED_CHANGE_SET_PATH),
@@ -359,7 +397,7 @@ export async function executeLiveRepair(
   const presence = await detectOpenAiApiKeyPresence({
     cwd: repositoryRoot,
     env: process.env,
-    envFiles: [".env.local", ".env"],
+    envFiles: openAiEnvFiles(process.env),
   });
   const adapter = new LiveCodexRepairAdapter();
 

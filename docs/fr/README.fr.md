@@ -57,13 +57,15 @@ La démonstration génère notamment :
 - `evidence/passport.html` ;
 - le tableau de bord statique généré sous `evidence/dashboard/`.
 
+Une exécution live explicite conserve séparément `evidence/live-repair-request.json`, `evidence/live-repair-report.json` et `evidence/live-repair.diff`, sans clé ni message fournisseur brut. La démonstration déterministe ne peut pas écraser ces diagnostics.
+
 Les schémas sont stricts, les objets et fichiers sont liés par SHA-256, les métriques inconnues restent `null`, et `humanApprovalRequired: true` est obligatoire. Le passeport constitue une aide à la décision, jamais une autorisation de merge.
 
 ## Intégration Codex
 
 Le chemin live utilise le SDK officiel `@openai/codex-sdk`. Il impose un worktree isolé, une liste de fichiers autorisés, trois tentatives au maximum, 120 secondes par tentative, un arrêt après deux constats sans progrès, l’annulation, une validation déterministe, le rejet d’un commit candidat et l’absence de merge automatique.
 
-Aucune clé `OPENAI_API_KEY` n’a été fournie pour la mission Genesis. Aucun appel live, résultat Codex, modèle, volume de tokens ou coût n’est donc revendiqué. QEDRA détecte uniquement la présence et la source de la clé sans jamais afficher sa valeur. L’absence d’authentification bloque seulement `repair --live` ; toutes les phases déterministes continuent.
+Une clé `OPENAI_API_KEY` locale et ignorée par Git a ensuite été configurée via le flux sécurisé OpenAI Platform. QEDRA a détecté sa présence sans afficher sa valeur. Une invocation SDK bornée a démarré dans un worktree isolé, puis s’est arrêtée avec `CODEX_UNKNOWN_FAILURE` avant validation et sans fichier modifié. Aucun résultat Codex, modèle, volume de tokens, coût ou succès live n’est donc revendiqué. Les phases déterministes restent indépendantes et vérifiées.
 
 Activation ultérieure, sous responsabilité humaine :
 
@@ -74,7 +76,7 @@ node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --json
 node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --live --json
 ```
 
-La création de clé, la facturation, les droits d’accès et l’approbation finale restent des décisions humaines.
+La facturation API — distincte d’un abonnement ChatGPT —, les limites du projet, les droits d’accès et l’approbation finale restent des décisions humaines. Pour la CI, utiliser un secret dédié dans l’environnement GitHub protégé `codex-live-repair`, jamais la clé locale du développeur.
 
 ## Validation
 
@@ -91,7 +93,7 @@ pnpm demo
 pnpm evidence:verify
 ```
 
-La CI par défaut n’utilise aucun secret OpenAI. Un job live existe uniquement sur déclenchement manuel explicite, protégé par secret et désactivé par défaut.
+La CI par défaut n’utilise aucun secret OpenAI. Un job live existe uniquement sur déclenchement manuel explicite, protégé par l’environnement GitHub `codex-live-repair` et désactivé par défaut.
 
 ## Limites
 

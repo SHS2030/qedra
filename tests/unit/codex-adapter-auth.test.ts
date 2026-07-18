@@ -89,4 +89,27 @@ describe("detectOpenAiApiKeyPresence", () => {
       "missing",
     ]);
   });
+
+  it("supports hermetic environment-only checks without reading local env files", async () => {
+    const cwd = await temporaryDirectory();
+    const secret = "ignored-file-secret-never-returned";
+    await writeFile(
+      join(cwd, ".env.local"),
+      `OPENAI_API_KEY=${secret}\n`,
+      "utf8",
+    );
+
+    const result = await detectOpenAiApiKeyPresence({
+      cwd,
+      env: { QEDRA_DISABLE_ENV_FILE_AUTH: "1" },
+    });
+
+    expect(result).toEqual({
+      present: false,
+      source: null,
+      liveReady: false,
+      checkedFiles: [],
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
 });

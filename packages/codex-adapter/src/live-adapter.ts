@@ -5,6 +5,7 @@ import { Codex } from "@openai/codex-sdk";
 
 import {
   detectOpenAiApiKeyPresence,
+  openAiEnvFiles,
   type OpenAiApiKeyPresenceOptions,
 } from "./auth.js";
 import {
@@ -12,6 +13,7 @@ import {
   type ObservableTokenUsage,
   type RepairAttemptEvidence,
   type RepairBlocker,
+  type RepairFailureDetailCode,
   type RepairRequest,
   type RepairResult,
   type RepairStatus,
@@ -20,6 +22,63 @@ import { loadOpenAiApiKey } from "./credential-loader.js";
 
 const MAX_REPAIR_ATTEMPTS = 10;
 const MAX_ATTEMPT_TIMEOUT_MS = 900_000;
+const MAX_FAILURE_MESSAGE_SCAN_LENGTH = 32_768;
+
+const QUOTA_FAILURE_PATTERNS = [
+  /\binsufficient[_ -]?quota\b/iu,
+  /\b(?:current|billing) quota\b/iu,
+  /\b(?:run|ran) out of credits\b/iu,
+  /\bno (?:credit )?balance left\b/iu,
+  /\bcredit balance\b.{0,80}\b(?:empty|exhausted|zero)\b/iu,
+  /\b(?:billing|spend|usage) limit\b.{0,80}\b(?:exceeded|reached)\b/iu,
+  /\bhit your usage limit\b/iu,
+] as const;
+
+const AUTHENTICATION_FAILURE_PATTERNS = [
+  /\bHTTP(?:\/\d(?:\.\d)?)?\s+401\b/iu,
+  /\bstatus(?: code)?\s*[:=]?\s*401\b/iu,
+  /\b401\s+(?:unauthori[sz]ed|authentication)\b/iu,
+  /\binvalid[_ -]?api[_ -]?key\b/iu,
+  /\bincorrect api key\b/iu,
+  /\bunauthori[sz]ed\b/iu,
+  /\bauthentication\b.{0,80}\b(?:error|failed|required)\b/iu,
+] as const;
+
+const ACCESS_FAILURE_PATTERNS = [
+  /\bHTTP(?:\/\d(?:\.\d)?)?\s+403\b/iu,
+  /\bstatus(?: code)?\s*[:=]?\s*403\b/iu,
+  /\b403\s+forbidden\b/iu,
+  /\bforbidden\b/iu,
+  /\bmodel[_ -]?not[_ -]?found\b/iu,
+  /\bdoes not have access\b/iu,
+  /\bnot permitted\b/iu,
+  /\bpermission denied\b/iu,
+  /\b(?:organi[sz]ation|project)\b.{0,80}\b(?:access|mismatch|permission)\b/iu,
+] as const;
+
+const RATE_LIMIT_FAILURE_PATTERNS = [
+  /\brate[_ -]?limit[_ -]?exceeded\b/iu,
+  /\btoo many requests\b/iu,
+  /\brequests per minute\b/iu,
+  /\btokens per minute\b/iu,
+  /\bretry[- ]after\b/iu,
+] as const;
+
+const TRANSPORT_FAILURE_PATTERNS = [
+  /\b(?:EAI_AGAIN|ECONNREFUSED|ECONNRESET|ENETUNREACH|ENOTFOUND|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT)\b/iu,
+  /\bdns lookup failed\b/iu,
+  /\bfetch failed\b/iu,
+  /\bnetwork is unreachable\b/iu,
+  /\bsocket hang up\b/iu,
+] as const;
+
+const LOCAL_PROCESS_FAILURE_PATTERNS = [
+  /\bcodex exec exited\b/iu,
+  /\b(?:EACCES|ENOENT|EPERM)\b/iu,
+  /\bchild process has no (?:stdin|stdout)\b/iu,
+  /\bspawn\b.{0,80}\b(?:error|failed)\b/iu,
+  /\bunsupported (?:platform|target triple)\b/iu,
+] as const;
 
 export interface CodexUsagePort {
   readonly input_tokens: number;
@@ -185,8 +244,17 @@ function blocker(
   kind: RepairBlocker["kind"],
   code: RepairStatus,
   message: string,
+  diagnostic?: {
+    readonly detailCode: RepairFailureDetailCode;
+    readonly retryable: boolean;
+  },
 ): RepairBlocker {
-  return { kind, code, message };
+  return {
+    kind,
+    code,
+    message,
+    ...(diagnostic === undefined ? {} : diagnostic),
+  };
 }
 
 function result(
@@ -210,13 +278,89 @@ function result(
   };
 }
 
-function isAuthenticationError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
+interface ClassifiedSdkFailure {
+  readonly status: "AUTHENTICATION_REQUIRED" | "LIVE_EXECUTION_FAILED";
+  readonly kind: "external" | "execution";
+  readonly message: string;
+  readonly detailCode: RepairFailureDetailCode;
+  readonly retryable: boolean;
+}
+
+function matchesAny(message: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(message));
+}
+
+function classifySdkFailure(error: unknown): ClassifiedSdkFailure {
+  const message =
+    error instanceof Error
+      ? error.message.slice(0, MAX_FAILURE_MESSAGE_SCAN_LENGTH)
+      : "";
+
+  // Quota must be classified before rate limiting because both can use HTTP 429.
+  if (matchesAny(message, QUOTA_FAILURE_PATTERNS)) {
+    return {
+      status: "LIVE_EXECUTION_FAILED",
+      kind: "external",
+      message:
+        "The OpenAI API reported exhausted credits or quota for the configured project.",
+      detailCode: "OPENAI_INSUFFICIENT_QUOTA",
+      retryable: false,
+    };
   }
-  return /(?:401|unauthori[sz]ed|authentication|required api key|api[_ ]?key)/iu.test(
-    error.message,
-  );
+  if (matchesAny(message, AUTHENTICATION_FAILURE_PATTERNS)) {
+    return {
+      status: "AUTHENTICATION_REQUIRED",
+      kind: "external",
+      message: "The live Codex SDK rejected the configured API authentication.",
+      detailCode: "OPENAI_AUTHENTICATION_REJECTED",
+      retryable: false,
+    };
+  }
+  if (matchesAny(message, ACCESS_FAILURE_PATTERNS)) {
+    return {
+      status: "LIVE_EXECUTION_FAILED",
+      kind: "external",
+      message:
+        "The configured OpenAI project, organization, or model is not authorized for this live repair.",
+      detailCode: "OPENAI_ACCESS_DENIED",
+      retryable: false,
+    };
+  }
+  if (matchesAny(message, RATE_LIMIT_FAILURE_PATTERNS)) {
+    return {
+      status: "LIVE_EXECUTION_FAILED",
+      kind: "external",
+      message: "The OpenAI API rate-limited the bounded live repair request.",
+      detailCode: "OPENAI_RATE_LIMITED",
+      retryable: true,
+    };
+  }
+  if (matchesAny(message, TRANSPORT_FAILURE_PATTERNS)) {
+    return {
+      status: "LIVE_EXECUTION_FAILED",
+      kind: "external",
+      message: "The Codex SDK could not reach the OpenAI API.",
+      detailCode: "OPENAI_TRANSPORT_FAILED",
+      retryable: true,
+    };
+  }
+  if (matchesAny(message, LOCAL_PROCESS_FAILURE_PATTERNS)) {
+    return {
+      status: "LIVE_EXECUTION_FAILED",
+      kind: "execution",
+      message: "The local Codex SDK process could not be executed.",
+      detailCode: "CODEX_LOCAL_PROCESS_FAILED",
+      retryable: false,
+    };
+  }
+  return {
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "execution",
+    message:
+      "The bounded Codex SDK attempt failed before deterministic validation.",
+    detailCode: "CODEX_UNKNOWN_FAILURE",
+    retryable: false,
+  };
 }
 
 function sdkFailureResult(
@@ -224,27 +368,15 @@ function sdkFailureResult(
   attempts: readonly RepairAttemptEvidence[],
   error: unknown,
 ): RepairResult {
-  if (isAuthenticationError(error)) {
-    return result(
-      request,
-      "AUTHENTICATION_REQUIRED",
-      attempts,
-      blocker(
-        "external",
-        "AUTHENTICATION_REQUIRED",
-        "The live Codex SDK rejected the configured API authentication.",
-      ),
-    );
-  }
+  const failure = classifySdkFailure(error);
   return result(
     request,
-    "LIVE_EXECUTION_FAILED",
+    failure.status,
     attempts,
-    blocker(
-      "execution",
-      "LIVE_EXECUTION_FAILED",
-      "The bounded Codex SDK attempt failed before deterministic validation.",
-    ),
+    blocker(failure.kind, failure.status, failure.message, {
+      detailCode: failure.detailCode,
+      retryable: failure.retryable,
+    }),
   );
 }
 
@@ -334,7 +466,7 @@ export class LiveCodexRepairAdapter {
 
   constructor(options: LiveCodexRepairAdapterOptions = {}) {
     this.#environment = options.environment ?? process.env;
-    this.#envFiles = options.envFiles ?? [".env.local", ".env"];
+    this.#envFiles = options.envFiles ?? openAiEnvFiles(this.#environment);
     this.#clientFactory = options.clientFactory;
   }
 

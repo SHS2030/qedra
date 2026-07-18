@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { generateEvidenceDashboard } from "../../../apps/evidence-dashboard/src/index.js";
 import {
   detectOpenAiApiKeyPresence,
+  openAiEnvFiles,
   REPAIR_REQUEST_SCHEMA_VERSION,
   REPAIR_RESULT_SCHEMA_VERSION,
   validateRecordedChangeSet,
@@ -151,7 +152,7 @@ async function createRepairEvidenceArtifact(
   const authentication = await detectOpenAiApiKeyPresence({
     cwd: repositoryRoot,
     env: process.env,
-    envFiles: [".env.local", ".env"],
+    envFiles: openAiEnvFiles(process.env),
   });
   const validations = execution.result.validationResults ?? [];
   const requestArtifact = await artifactReference(
@@ -270,7 +271,7 @@ async function writeLiveBlocker(
   const authentication = await detectOpenAiApiKeyPresence({
     cwd: repositoryRoot,
     env: process.env,
-    envFiles: [".env.local", ".env"],
+    envFiles: openAiEnvFiles(process.env),
   });
   if (authentication.present) {
     return null;

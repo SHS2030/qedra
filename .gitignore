@@ -52,6 +52,9 @@ evidence/repair-evidence.json
 evidence/recorded-change-set.json
 evidence/verification-result.json
 evidence/live-repair-blocker.json
+evidence/live-repair-request.json
+evidence/live-repair-report.json
+evidence/live-repair.diff
 evidence/passport.json
 evidence/passport.html
 evidence/dashboard/

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       run_live_codex:
-        description: Run the bounded live Codex repair job (requires repository secret)
+        description: Run the bounded live Codex repair job (requires protected environment secret)
         required: true
         default: false
         type: boolean
@@ -172,6 +172,6 @@ jobs:
           retention-days: 7
           path: |
             evidence/counterexample.json
-            evidence/repair-request.json
-            evidence/repair-report.json
-            evidence/repair.diff
+            evidence/live-repair-request.json
+            evidence/live-repair-report.json
+            evidence/live-repair.diff

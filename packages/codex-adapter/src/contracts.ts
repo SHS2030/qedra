@@ -106,10 +106,21 @@ export interface RepairValidationEvidence {
   readonly outputTruncated: boolean;
 }
 
+export type RepairFailureDetailCode =
+  | "OPENAI_AUTHENTICATION_REJECTED"
+  | "OPENAI_INSUFFICIENT_QUOTA"
+  | "OPENAI_RATE_LIMITED"
+  | "OPENAI_ACCESS_DENIED"
+  | "OPENAI_TRANSPORT_FAILED"
+  | "CODEX_LOCAL_PROCESS_FAILED"
+  | "CODEX_UNKNOWN_FAILURE";
+
 export interface RepairBlocker {
   readonly kind: "external" | "policy" | "execution";
   readonly code: RepairStatus;
   readonly message: string;
+  readonly detailCode?: RepairFailureDetailCode;
+  readonly retryable?: boolean;
 }
 
 export interface RepairResult {

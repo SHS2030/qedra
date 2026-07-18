@@ -204,3 +204,41 @@ Fresh local validation after these corrections produced the following observable
 | Tracked credential and likely-secret scan                               | 0 sensitive credential files and 0 likely secret-bearing files                                                       |
 
 The evidence hash observed during this dirty pre-commit gate is intentionally provisional. The complete demo and hash verification must run again after the final source/documentation commit so the generated counterexample and passport bind to a clean final HEAD. No API key was added, no live SDK call was attempted, and no Codex identity, call, token, or cost metric was invented.
+
+### M6 — Secure live credential handoff and resumed validation
+
+On 2026-07-18, the interrupted mission resumed from commit `0f9f3e93d79be092e33b2d762239d40ba6ef6de4` without resetting or discarding existing work. The OpenAI Platform secure picker created a project-scoped key and the encrypted local-save workflow wrote it to ignored `.env.local` as `OPENAI_API_KEY`. The value was never printed, returned in evidence, passed as a CLI argument, or added to Git. `qedra doctor --json` then reported `READY_FOR_LIVE_REPAIR`, source `env-file`, Codex SDK `0.144.3`, and all pinned tools including Flutter `3.44.2`.
+
+A bounded live repair was genuinely invoked in an isolated Git worktree. The latest observed attempt started one SDK invocation, ran for 6,967 ms, produced no changed files, no validation results, no patch, no commit, no merge, and no token or cost metrics. It stopped with `LIVE_EXECUTION_FAILED` and the safe detail code `CODEX_UNKNOWN_FAILURE`. The raw SDK/provider error was deliberately not serialized, so API billing or project access remains plausible but unproven. The run is not represented as a successful Codex repair.
+
+The resume exposed and corrected four observability issues:
+
+- restricted execution could not write `.git/worktrees`; record/replay now preserves this as `ISOLATION_REQUIRED` instead of masking it as a captured-file mismatch;
+- live SDK failures now map to fixed non-secret detail codes for authentication, quota, rate limiting, access, transport, local process, and unknown errors, with raw messages and credential sentinels excluded by tests;
+- live request, report, and diff snapshots now use `evidence/live-repair-*` and survive later deterministic demo regeneration;
+- the Flutter probe now disables version checks and analytics and allows a 30-second cold start; hermetic E2E runs can disable env-file authentication without disabling explicitly injected sentinel credentials.
+
+The first resumed `pnpm demo` correctly failed inside the restricted filesystem boundary because Git could not create worktree metadata. `git apply --check --whitespace=error-all` proved the recorded patch itself was valid. The identical demo was rerun with the authorized Git boundary and passed. A subsequent E2E run initially found that passport generation bypassed the new hermetic authentication switch; both passport credential checks were corrected and the unchanged E2E suite then passed.
+
+Observed validation after these changes:
+
+| Command or check                                    | Result                                                                                                              |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `pnpm install --frozen-lockfile`                    | Passed; all 12 workspace projects already matched the lockfile                                                      |
+| `pnpm format:check`                                 | Passed                                                                                                              |
+| `pnpm lint`                                         | Passed                                                                                                              |
+| `pnpm typecheck`                                    | Passed                                                                                                              |
+| `pnpm build`                                        | Passed                                                                                                              |
+| `pnpm test:unit`                                    | 10 files, 61 tests passed                                                                                           |
+| `pnpm test:integration`                             | 1 file, 4 tests passed                                                                                              |
+| `pnpm test:adversarial`                             | 1 file, 3 tests passed                                                                                              |
+| `pnpm test:e2e`                                     | 1 file, 4 scenarios passed, including live-snapshot preservation                                                    |
+| `dart format --output=none --set-exit-if-changed .` | 6 files, 0 changes                                                                                                  |
+| `flutter analyze --no-pub`                          | Passed; no issues                                                                                                   |
+| `flutter test --no-pub`                             | 4 tests passed                                                                                                      |
+| Authorized `pnpm demo`                              | Passed: expected attack failure, repair success, replay PASS, verification PASS                                     |
+| `pnpm evidence:verify` after the authorized demo    | `VERIFIED`; all 9 artifact checks in that generated bundle passed                                                   |
+| GitHub Actions YAML parse                           | Passed; deterministic job and protected `codex-live-repair` job present                                             |
+| Tracked credential scan                             | No real key, selected organization ID, or selected project ID found; only an intentional unit-test sentinel matched |
+
+The last observed remote Actions run, `29382601919`, never acquired a runner because GitHub reported that the account was locked for a billing issue. A fresh `gh auth status` on 2026-07-18 also reported the stored `SHS2030` token invalid, so remote environment inspection and Actions reruns require human GitHub re-authentication. These external account conditions do not alter the fully executable local record/replay proof. The deterministic demo and passport verification must be regenerated once more after the final documentation commit so their Git metadata binds to the final clean HEAD.

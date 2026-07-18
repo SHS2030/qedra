@@ -21,6 +21,14 @@ export interface OpenAiApiKeyPresenceOptions {
   readonly envFiles?: readonly string[];
 }
 
+export function openAiEnvFiles(
+  environment: NodeJS.ProcessEnv,
+): readonly string[] {
+  return environment.QEDRA_DISABLE_ENV_FILE_AUTH === "1"
+    ? []
+    : [".env.local", ".env"];
+}
+
 function hasUsableValue(value: string | undefined): boolean {
   if (value === undefined) {
     return false;
@@ -75,7 +83,7 @@ export async function detectOpenAiApiKeyPresence(
     };
   }
 
-  const envFiles = options.envFiles ?? [".env.local", ".env"];
+  const envFiles = options.envFiles ?? openAiEnvFiles(environment);
   const checkedFiles: EnvFilePresence[] = [];
   let configuredFileFound = false;
   for (const name of envFiles) {

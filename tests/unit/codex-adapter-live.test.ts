@@ -10,11 +10,147 @@ import {
   type CodexClientPort,
   type CodexRunResultPort,
   type CodexThreadPort,
+  type RepairBlocker,
+  type RepairFailureDetailCode,
   type RepairRequest,
+  type RepairStatus,
   type WorkspaceAssessment,
 } from "../../packages/codex-adapter/src/index.js";
 
 const temporaryDirectories: string[] = [];
+const CONFIGURED_API_KEY = "unit-test-key-never-logged";
+const RAW_PROVIDER_DETAIL = "raw-provider-diagnostic-never-persisted";
+const SENSITIVE_ERROR_MARKER = "sk-proj-unit-test-secret-never-persisted";
+
+interface SdkFailureFixture {
+  readonly name: string;
+  readonly error: Error;
+  readonly status: RepairStatus;
+  readonly kind: RepairBlocker["kind"];
+  readonly detailCode: RepairFailureDetailCode;
+  readonly retryable: boolean;
+  readonly safeMessage: string;
+}
+
+const sdkFailureFixtures = [
+  {
+    name: "authentication rejection",
+    error: new Error(
+      `401 Unauthorized: invalid_api_key ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "AUTHENTICATION_REQUIRED",
+    kind: "external",
+    detailCode: "OPENAI_AUTHENTICATION_REJECTED",
+    retryable: false,
+    safeMessage:
+      "The live Codex SDK rejected the configured API authentication.",
+  },
+  {
+    name: "exhausted API quota",
+    error: new Error(
+      `429 rate_limit_exceeded insufficient_quota: current quota exhausted ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "external",
+    detailCode: "OPENAI_INSUFFICIENT_QUOTA",
+    retryable: false,
+    safeMessage:
+      "The OpenAI API reported exhausted credits or quota for the configured project.",
+  },
+  {
+    name: "ordinary rate limit",
+    error: new Error(
+      `429 rate_limit_exceeded: requests per minute exceeded ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "external",
+    detailCode: "OPENAI_RATE_LIMITED",
+    retryable: true,
+    safeMessage: "The OpenAI API rate-limited the bounded live repair request.",
+  },
+  {
+    name: "project or model access denial",
+    error: new Error(
+      `403 model_not_found: project does not have access ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "external",
+    detailCode: "OPENAI_ACCESS_DENIED",
+    retryable: false,
+    safeMessage:
+      "The configured OpenAI project, organization, or model is not authorized for this live repair.",
+  },
+  {
+    name: "transport failure",
+    error: new Error(
+      `ETIMEDOUT while connecting to provider ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "external",
+    detailCode: "OPENAI_TRANSPORT_FAILED",
+    retryable: true,
+    safeMessage: "The Codex SDK could not reach the OpenAI API.",
+  },
+  {
+    name: "local Codex process failure",
+    error: new Error(
+      `Codex Exec exited with code 1: ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "execution",
+    detailCode: "CODEX_LOCAL_PROCESS_FAILED",
+    retryable: false,
+    safeMessage: "The local Codex SDK process could not be executed.",
+  },
+  {
+    name: "unknown SDK failure",
+    error: new Error(
+      `Unexpected provider rejection ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "execution",
+    detailCode: "CODEX_UNKNOWN_FAILURE",
+    retryable: false,
+    safeMessage:
+      "The bounded Codex SDK attempt failed before deterministic validation.",
+  },
+  {
+    name: "ambiguous HTTP 429",
+    error: new Error(
+      `429 provider rejection ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "execution",
+    detailCode: "CODEX_UNKNOWN_FAILURE",
+    retryable: false,
+    safeMessage:
+      "The bounded Codex SDK attempt failed before deterministic validation.",
+  },
+  {
+    name: "unrelated local 401 identifier",
+    error: new Error(
+      `Local worker 401 terminated unexpectedly ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "execution",
+    detailCode: "CODEX_UNKNOWN_FAILURE",
+    retryable: false,
+    safeMessage:
+      "The bounded Codex SDK attempt failed before deterministic validation.",
+  },
+  {
+    name: "unrelated local 403 identifier",
+    error: new Error(
+      `Local path segment 403 failed a check ${RAW_PROVIDER_DETAIL} ${SENSITIVE_ERROR_MARKER}`,
+    ),
+    status: "LIVE_EXECUTION_FAILED",
+    kind: "execution",
+    detailCode: "CODEX_UNKNOWN_FAILURE",
+    retryable: false,
+    safeMessage:
+      "The bounded Codex SDK attempt failed before deterministic validation.",
+  },
+] as const satisfies readonly SdkFailureFixture[];
 
 afterEach(async () => {
   await Promise.all(
@@ -310,34 +446,47 @@ describe("LiveCodexRepairAdapter", () => {
     expect(result.attempts[0]?.invocationStarted).toBe(true);
   });
 
-  it("preserves an SDK authentication rejection after an invocation starts", async () => {
-    const paths = await isolatedPaths();
-    const client = new FakeClient(() =>
-      Promise.reject(new Error("401 Unauthorized: invalid API key")),
-    );
-    const adapter = new LiveCodexRepairAdapter({
-      environment: { OPENAI_API_KEY: "unit-test-key-never-logged" },
-      clientFactory: () => client,
-    });
+  it.each(sdkFailureFixtures)(
+    "classifies $name without persisting raw provider details",
+    async (fixture) => {
+      const paths = await isolatedPaths();
+      const client = new FakeClient(() => Promise.reject(fixture.error));
+      const adapter = new LiveCodexRepairAdapter({
+        environment: { OPENAI_API_KEY: CONFIGURED_API_KEY },
+        clientFactory: () => client,
+      });
 
-    const result = await adapter.execute(
-      request(paths.repository, paths.worktree),
-      {
-        workingDirectory: paths.worktree,
-        assessWorkspace: assessmentSequence([
-          { passed: false, fingerprint: "before" },
-        ]),
-      },
-    );
+      const result = await adapter.execute(
+        request(paths.repository, paths.worktree),
+        {
+          workingDirectory: paths.worktree,
+          assessWorkspace: assessmentSequence([
+            { passed: false, fingerprint: "before" },
+          ]),
+        },
+      );
 
-    expect(result.status).toBe("AUTHENTICATION_REQUIRED");
-    expect(result.blocker).toMatchObject({
-      kind: "external",
-      code: "AUTHENTICATION_REQUIRED",
-    });
-    expect(result.attempts).toHaveLength(1);
-    expect(result.attempts[0]?.invocationStarted).toBe(true);
-  });
+      expect(result.status).toBe(fixture.status);
+      expect(result.blocker).toMatchObject({
+        kind: fixture.kind,
+        code: fixture.status,
+        message: fixture.safeMessage,
+        detailCode: fixture.detailCode,
+        retryable: fixture.retryable,
+      });
+      expect(result.attempts).toHaveLength(1);
+      expect(result.attempts[0]).toMatchObject({
+        invocationStarted: true,
+        threadId: "thread-fixture",
+      });
+
+      const serializedResult = JSON.stringify(result);
+      expect(serializedResult).not.toContain(fixture.error.message);
+      expect(serializedResult).not.toContain(RAW_PROVIDER_DETAIL);
+      expect(serializedResult).not.toContain(SENSITIVE_ERROR_MARKER);
+      expect(serializedResult).not.toContain(CONFIGURED_API_KEY);
+    },
+  );
 
   it("does not count a thread-construction failure as an SDK invocation", async () => {
     const paths = await isolatedPaths();

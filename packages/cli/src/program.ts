@@ -24,9 +24,7 @@ import {
 import {
   executeLiveRepair,
   executeRecordedRepair,
-  REPAIR_DIFF_PATH,
-  REPAIR_REPORT_PATH,
-  REPAIR_REQUEST_PATH,
+  repairArtifactPaths,
   type RepairExecution,
 } from "./repair.js";
 import { findRepositoryRoot } from "./repository.js";
@@ -115,6 +113,7 @@ function formatProofLoop(run: ProofLoopRun, artifact: string | null): string {
 }
 
 function repairOutput(execution: RepairExecution): object {
+  const paths = repairArtifactPaths(execution.request.mode);
   return {
     schemaVersion: "1.0.0",
     invariantId: execution.request.invariant.id,
@@ -130,14 +129,15 @@ function repairOutput(execution: RepairExecution): object {
     committed: execution.result.committed,
     merged: execution.result.merged,
     artifacts: {
-      request: REPAIR_REQUEST_PATH,
-      report: REPAIR_REPORT_PATH,
-      diff: execution.result.patch === undefined ? null : REPAIR_DIFF_PATH,
+      request: paths.request,
+      report: paths.report,
+      diff: execution.result.patch === undefined ? null : paths.diff,
     },
   };
 }
 
 function formatRepair(execution: RepairExecution): string {
+  const paths = repairArtifactPaths(execution.request.mode);
   const validations = execution.result.validationResults ?? [];
   const lines = [
     `TRANSFER_IDEMPOTENCY repair ${execution.result.status}`,
@@ -157,8 +157,8 @@ function formatRepair(execution: RepairExecution): string {
         : "NOT PASSED"
     }`,
     `Human approval: ${execution.result.approvalStatus} (required)`,
-    `Repair request: ${REPAIR_REQUEST_PATH}`,
-    `Repair report: ${REPAIR_REPORT_PATH}`,
+    `Repair request: ${paths.request}`,
+    `Repair report: ${paths.report}`,
   ];
   if (execution.result.blocker !== undefined) {
     lines.push(`Blocker: ${execution.result.blocker.message}`);

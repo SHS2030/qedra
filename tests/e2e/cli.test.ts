@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 const REPOSITORY_ROOT = process.cwd();
 const CLI_ENTRYPOINT = "packages/cli/src/bin.ts";
 const SECRET_SENTINEL = "e2e-secret-sentinel-never-print";
+let liveRepairSnapshotBeforeReplay: string | undefined;
 
 interface ProcessResult {
   readonly code: number | null;
@@ -26,6 +27,7 @@ function sanitizedEnvironment(
   const environment = { ...process.env, ...overrides };
   delete environment.OPENAI_API_KEY;
   delete environment.CODEX_API_KEY;
+  environment.QEDRA_DISABLE_ENV_FILE_AUTH = "1";
   return environment;
 }
 
@@ -134,7 +136,7 @@ describe.sequential("QEDRA direct-process CLI", () => {
 
   it("reports replay readiness and never emits an API key value", async () => {
     const doctor = await runCli(["doctor", "--json"], {
-      timeoutMs: 30_000,
+      timeoutMs: 60_000,
     });
     expect(doctor.code).toBe(0);
     const report = asRecord(parseCleanJson(doctor), "doctor report");
@@ -160,7 +162,7 @@ describe.sequential("QEDRA direct-process CLI", () => {
 
     const keyPresenceProbe = await runCli(["doctor", "--json"], {
       environment: { OPENAI_API_KEY: SECRET_SENTINEL },
-      timeoutMs: 30_000,
+      timeoutMs: 60_000,
     });
     expect(keyPresenceProbe.code).toBe(0);
     const keyPresenceReport = asRecord(
@@ -180,7 +182,7 @@ describe.sequential("QEDRA direct-process CLI", () => {
       blocker: null,
     });
     expect(keyPresenceProbe.stdout).not.toContain(SECRET_SENTINEL);
-  }, 45_000);
+  }, 135_000);
 
   it("uses stable exit codes for the vulnerable proof, fixed proof, and absent live authentication", async () => {
     const attack = await runCli([
@@ -276,6 +278,20 @@ describe.sequential("QEDRA direct-process CLI", () => {
       approvalStatus: "PENDING",
       committed: false,
       merged: false,
+      artifacts: {
+        request: "evidence/live-repair-request.json",
+        report: "evidence/live-repair-report.json",
+        diff: null,
+      },
+    });
+    liveRepairSnapshotBeforeReplay = await readFile(
+      resolve(REPOSITORY_ROOT, "evidence/live-repair-report.json"),
+      "utf8",
+    );
+    expect(liveRepairSnapshotBeforeReplay).not.toContain(SECRET_SENTINEL);
+    expect(JSON.parse(liveRepairSnapshotBeforeReplay)).toMatchObject({
+      mode: "live",
+      status: "AUTHENTICATION_REQUIRED",
     });
   }, 45_000);
 
@@ -284,6 +300,13 @@ describe.sequential("QEDRA direct-process CLI", () => {
       timeoutMs: 90_000,
     });
     expect(demo.code).toBe(0);
+    expect(liveRepairSnapshotBeforeReplay).toBeDefined();
+    expect(
+      await readFile(
+        resolve(REPOSITORY_ROOT, "evidence/live-repair-report.json"),
+        "utf8",
+      ),
+    ).toBe(liveRepairSnapshotBeforeReplay);
     const demoResult = asRecord(parseCleanJson(demo), "demo result");
     expect(demoResult).toMatchObject({
       schemaVersion: "1.0.0",

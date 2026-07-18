@@ -245,7 +245,7 @@ If Flutter cannot access its SDK cache or dependencies in a restricted environme
 
 `.github/workflows/ci.yml` executes the TypeScript gates on a clean GitHub-hosted runner with Node 24.18.0 and pnpm 11.13.0. Default push and pull-request validation have no OpenAI secret. Generated evidence is uploaded after the deterministic demo.
 
-The live Codex job exists only behind a manual `workflow_dispatch` boolean and the `OPENAI_API_KEY` repository secret. Its default is disabled. A skipped live job is expected and must not be represented as a successful live invocation.
+The live Codex job exists only behind a manual `workflow_dispatch` boolean and the `OPENAI_API_KEY` secret in the protected `codex-live-repair` environment. Its default is disabled. A skipped live job is expected and must not be represented as a successful live invocation. The live artifact upload uses `evidence/live-repair-*`, so a subsequent deterministic run cannot overwrite the diagnostic snapshot.
 
 ## Failure triage
 
@@ -262,3 +262,5 @@ Use this order:
 9. review `git status --short` for accidental artifacts or source-worktree mutation.
 
 Authentication absence blocks only `repair --live`. It must not block unit, integration, adversarial, e2e, build, record/replay, demo, dashboard, or passport verification.
+
+The CLI E2E harness sets `QEDRA_DISABLE_ENV_FILE_AUTH=1` so a developer's ignored `.env.local` cannot activate live repair or make credential assertions non-deterministic. This test-only switch disables env-file lookup; an explicitly injected `OPENAI_API_KEY` is still detected for sentinel coverage. Normal CLI execution continues to inspect `.env.local` and `.env`.

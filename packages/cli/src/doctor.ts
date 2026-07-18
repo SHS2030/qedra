@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
-
-import { detectOpenAiApiKeyPresence } from "../../codex-adapter/src/index.js";
+import {
+  detectOpenAiApiKeyPresence,
+  openAiEnvFiles,
+} from "../../codex-adapter/src/index.js";
 
 export interface ToolDiagnostic {
   readonly available: boolean;
@@ -81,10 +82,7 @@ export async function runDoctor(repositoryRoot: string): Promise<DoctorReport> {
   const authentication = await detectOpenAiApiKeyPresence({
     cwd: repositoryRoot,
     env: process.env,
-    envFiles: [
-      resolve(repositoryRoot, ".env.local"),
-      resolve(repositoryRoot, ".env"),
-    ],
+    envFiles: openAiEnvFiles(process.env),
   });
 
   const node: ToolDiagnostic = {
@@ -95,7 +93,11 @@ export async function runDoctor(repositoryRoot: string): Promise<DoctorReport> {
   const pnpm = inspectTool("pnpm", ["--version"]);
   const git = inspectTool("git", ["--version"]);
   const docker = inspectTool("docker", ["--version"]);
-  const flutter = inspectTool("flutter", ["--version"], 15_000);
+  const flutter = inspectTool(
+    "flutter",
+    ["--no-version-check", "--suppress-analytics", "--version"],
+    30_000,
+  );
 
   let codexSdk: ToolDiagnostic;
   try {

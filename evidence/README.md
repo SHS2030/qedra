@@ -22,6 +22,9 @@ pnpm evidence:verify
 | `replay-result.json`       | Exact-request replay result and deterministic verification                                        |
 | `verification-result.json` | Fresh corrected-target verification result                                                        |
 | `live-repair-blocker.json` | Explicit credential blocker when live repair is unavailable                                       |
+| `live-repair-request.json` | Latest live-mode request snapshot, preserved across deterministic demo regeneration               |
+| `live-repair-report.json`  | Latest live-mode result and safely classified blocker, without raw provider errors                |
+| `live-repair.diff`         | Latest live-mode isolated diff; empty when no candidate change was produced                       |
 | `passport.json`            | Canonical machine-verifiable evidence passport                                                    |
 | `passport.html`            | Standalone, dependency-free human review view                                                     |
 
