@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -7,6 +8,15 @@ import { describe, expect, it } from "vitest";
 const REPOSITORY_ROOT = process.cwd();
 const CLI_ENTRYPOINT = "packages/cli/src/bin.ts";
 const SECRET_SENTINEL = "e2e-secret-sentinel-never-print";
+const TRANSFER_EVIDENCE_DIRECTORY = "evidence/transfer-idempotency";
+const PAYLOAD_BINDING_EVIDENCE_DIRECTORY =
+  "evidence/idempotency-key-payload-binding";
+const PAYLOAD_BINDING_CONFLICT_ERROR =
+  "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD";
+const PAYLOAD_BINDING_REPAIR_FIXTURE = resolve(
+  REPOSITORY_ROOT,
+  "packages/codex-adapter/fixtures/IDEMPOTENCY_KEY_PAYLOAD_BINDING.patch",
+);
 let liveRepairSnapshotBeforeReplay: string | undefined;
 
 interface ProcessResult {
@@ -130,7 +140,7 @@ describe.sequential("QEDRA direct-process CLI", () => {
       schemaVersion: "1.0.0",
       status: "VALIDATED",
       path: "constitutions/qedra.yaml",
-      invariantIds: ["TRANSFER_IDEMPOTENCY"],
+      invariantIds: ["TRANSFER_IDEMPOTENCY", "IDEMPOTENCY_KEY_PAYLOAD_BINDING"],
     });
   });
 
@@ -200,7 +210,7 @@ describe.sequential("QEDRA direct-process CLI", () => {
       invariantId: "TRANSFER_IDEMPOTENCY",
       status: "FAILED",
       target: "vulnerable",
-      counterexampleArtifact: "evidence/counterexample.json",
+      counterexampleArtifact: `${TRANSFER_EVIDENCE_DIRECTORY}/counterexample.json`,
     });
     expect(attackActual).toMatchObject({
       balances: { A: 8_000, B: 7_000 },
@@ -211,7 +221,11 @@ describe.sequential("QEDRA direct-process CLI", () => {
     const counterexample = asRecord(
       JSON.parse(
         await readFile(
-          resolve(REPOSITORY_ROOT, "evidence/counterexample.json"),
+          resolve(
+            REPOSITORY_ROOT,
+            TRANSFER_EVIDENCE_DIRECTORY,
+            "counterexample.json",
+          ),
           "utf8",
         ),
       ) as unknown,
@@ -279,13 +293,17 @@ describe.sequential("QEDRA direct-process CLI", () => {
       committed: false,
       merged: false,
       artifacts: {
-        request: "evidence/live-repair-request.json",
-        report: "evidence/live-repair-report.json",
+        request: `${TRANSFER_EVIDENCE_DIRECTORY}/live-repair-request.json`,
+        report: `${TRANSFER_EVIDENCE_DIRECTORY}/live-repair-report.json`,
         diff: null,
       },
     });
     liveRepairSnapshotBeforeReplay = await readFile(
-      resolve(REPOSITORY_ROOT, "evidence/live-repair-report.json"),
+      resolve(
+        REPOSITORY_ROOT,
+        TRANSFER_EVIDENCE_DIRECTORY,
+        "live-repair-report.json",
+      ),
       "utf8",
     );
     expect(liveRepairSnapshotBeforeReplay).not.toContain(SECRET_SENTINEL);
@@ -293,6 +311,146 @@ describe.sequential("QEDRA direct-process CLI", () => {
       mode: "live",
       status: "AUTHENTICATION_REQUIRED",
     });
+  }, 45_000);
+
+  it("reports payload-binding violations and corrected 409 conflicts as clean JSON", async () => {
+    const attack = await runCli([
+      "attack",
+      "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+      "--target",
+      "vulnerable",
+      "--json",
+    ]);
+    expect(attack.code).toBe(10);
+    const attackResult = asRecord(
+      parseCleanJson(attack),
+      "payload-binding attack result",
+    );
+    const attackExpected = asRecord(
+      attackResult.expected,
+      "payload-binding expected state",
+    );
+    const attackActual = asRecord(
+      attackResult.actual,
+      "payload-binding vulnerable state",
+    );
+    expect(attackResult).toMatchObject({
+      schemaVersion: "1.0.0",
+      invariantId: "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+      status: "FAILED",
+      target: "vulnerable",
+      scenarioId: "idempotency-key-payload-conflict",
+      counterexampleArtifact: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/counterexample.json`,
+    });
+    expect(attackExpected).toMatchObject({
+      amountConflictStatus: 409,
+      amountConflictError: PAYLOAD_BINDING_CONFLICT_ERROR,
+      destinationConflictStatus: 409,
+      destinationConflictError: PAYLOAD_BINDING_CONFLICT_ERROR,
+      sourceConflictStatus: 409,
+      sourceConflictError: PAYLOAD_BINDING_CONFLICT_ERROR,
+    });
+    expect(attackActual).toMatchObject({
+      balances: { A: 9_000, B: 6_000, C: 2_000 },
+      ledgerEntries: 2,
+      amountConflictStatus: 200,
+      amountConflictError: null,
+      amountConflictStateUnchanged: true,
+      destinationConflictStatus: 200,
+      destinationConflictError: null,
+      destinationConflictStateUnchanged: true,
+      sourceConflictStatus: 200,
+      sourceConflictError: null,
+      sourceConflictStateUnchanged: true,
+      identicalRetryStatus: 200,
+      identicalRetryMatchesInitialResult: true,
+      originalTransferPreserved: true,
+    });
+    expect(asArray(attackActual.ledger, "vulnerable ledger")).toEqual(
+      asArray(attackExpected.ledger, "expected ledger"),
+    );
+    expect(
+      asArray(attackResult.violations, "payload-binding violations").map(
+        (violation) => asRecord(violation, "payload-binding violation").code,
+      ),
+    ).toEqual([
+      "AMOUNT_CONFLICT_NOT_REJECTED",
+      "AMOUNT_CONFLICT_ERROR_MISMATCH",
+      "DESTINATION_CONFLICT_NOT_REJECTED",
+      "DESTINATION_CONFLICT_ERROR_MISMATCH",
+      "SOURCE_CONFLICT_NOT_REJECTED",
+      "SOURCE_CONFLICT_ERROR_MISMATCH",
+    ]);
+
+    const counterexample = asRecord(
+      JSON.parse(
+        await readFile(
+          resolve(
+            REPOSITORY_ROOT,
+            PAYLOAD_BINDING_EVIDENCE_DIRECTORY,
+            "counterexample.json",
+          ),
+          "utf8",
+        ),
+      ) as unknown,
+      "payload-binding counterexample",
+    );
+    expect(counterexample).toMatchObject({
+      invariant: { id: "IDEMPOTENCY_KEY_PAYLOAD_BINDING" },
+      scenario: { id: "idempotency-key-payload-conflict" },
+      reproductionCommand:
+        "node --import tsx packages/cli/src/bin.ts attack IDEMPOTENCY_KEY_PAYLOAD_BINDING --target vulnerable --json",
+    });
+
+    const verification = await runCli([
+      "verify",
+      "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+      "--target",
+      "fixed",
+      "--json",
+    ]);
+    expect(verification.code).toBe(0);
+    const verificationResult = asRecord(
+      parseCleanJson(verification),
+      "payload-binding verification result",
+    );
+    const verificationExpected = asRecord(
+      verificationResult.expected,
+      "payload-binding verification expectation",
+    );
+    const verificationActual = asRecord(
+      verificationResult.actual,
+      "payload-binding corrected state",
+    );
+    expect(verificationResult).toMatchObject({
+      schemaVersion: "1.0.0",
+      invariantId: "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+      status: "PASSED",
+      target: "fixed",
+      scenarioId: "idempotency-key-payload-conflict",
+      counterexampleArtifact: null,
+      violations: [],
+    });
+    expect(verificationActual).toEqual(verificationExpected);
+    expect(verificationActual).toMatchObject({
+      balances: { A: 9_000, B: 6_000, C: 2_000 },
+      ledgerEntries: 2,
+      amountConflictStatus: 409,
+      amountConflictError: PAYLOAD_BINDING_CONFLICT_ERROR,
+      amountConflictStateUnchanged: true,
+      destinationConflictStatus: 409,
+      destinationConflictError: PAYLOAD_BINDING_CONFLICT_ERROR,
+      destinationConflictStateUnchanged: true,
+      sourceConflictStatus: 409,
+      sourceConflictError: PAYLOAD_BINDING_CONFLICT_ERROR,
+      sourceConflictStateUnchanged: true,
+      identicalRetryStatus: 200,
+      identicalRetryMatchesInitialResult: true,
+      originalTransferPreserved: true,
+    });
+    expect(asArray(verificationActual.ledger, "corrected ledger")).toHaveLength(
+      2,
+    );
   }, 45_000);
 
   it("completes deterministic repair replay and verifies the JSON and HTML passports", async () => {
@@ -303,7 +461,11 @@ describe.sequential("QEDRA direct-process CLI", () => {
     expect(liveRepairSnapshotBeforeReplay).toBeDefined();
     expect(
       await readFile(
-        resolve(REPOSITORY_ROOT, "evidence/live-repair-report.json"),
+        resolve(
+          REPOSITORY_ROOT,
+          TRANSFER_EVIDENCE_DIRECTORY,
+          "live-repair-report.json",
+        ),
         "utf8",
       ),
     ).toBe(liveRepairSnapshotBeforeReplay);
@@ -342,15 +504,15 @@ describe.sequential("QEDRA direct-process CLI", () => {
       humanApprovalRequired: true,
     });
     expect(asRecord(demoResult.artifacts, "demo artifacts")).toEqual({
-      counterexample: "evidence/counterexample.json",
-      passportJson: "evidence/passport.json",
-      passportHtml: "evidence/passport.html",
-      dashboard: "evidence/dashboard/index.html",
-      liveRepairBlocker: "evidence/live-repair-blocker.json",
+      counterexample: `${TRANSFER_EVIDENCE_DIRECTORY}/counterexample.json`,
+      passportJson: `${TRANSFER_EVIDENCE_DIRECTORY}/passport.json`,
+      passportHtml: `${TRANSFER_EVIDENCE_DIRECTORY}/passport.html`,
+      dashboard: `${TRANSFER_EVIDENCE_DIRECTORY}/dashboard/index.html`,
+      liveRepairBlocker: `${TRANSFER_EVIDENCE_DIRECTORY}/live-repair-blocker.json`,
     });
 
     const passportSource = await readFile(
-      resolve(REPOSITORY_ROOT, "evidence/passport.json"),
+      resolve(REPOSITORY_ROOT, TRANSFER_EVIDENCE_DIRECTORY, "passport.json"),
       "utf8",
     );
     const passport = asRecord(
@@ -386,9 +548,16 @@ describe.sequential("QEDRA direct-process CLI", () => {
     });
 
     const [passportHtml, dashboardHtml] = await Promise.all([
-      readFile(resolve(REPOSITORY_ROOT, "evidence/passport.html"), "utf8"),
       readFile(
-        resolve(REPOSITORY_ROOT, "evidence/dashboard/index.html"),
+        resolve(REPOSITORY_ROOT, TRANSFER_EVIDENCE_DIRECTORY, "passport.html"),
+        "utf8",
+      ),
+      readFile(
+        resolve(
+          REPOSITORY_ROOT,
+          TRANSFER_EVIDENCE_DIRECTORY,
+          "dashboard/index.html",
+        ),
         "utf8",
       ),
     ]);
@@ -428,7 +597,8 @@ describe.sequential("QEDRA direct-process CLI", () => {
 
     const recordedChangeSetPath = resolve(
       REPOSITORY_ROOT,
-      "evidence/recorded-change-set.json",
+      TRANSFER_EVIDENCE_DIRECTORY,
+      "recorded-change-set.json",
     );
     const recordedChangeSet = await readFile(recordedChangeSetPath, "utf8");
     try {
@@ -465,4 +635,298 @@ describe.sequential("QEDRA direct-process CLI", () => {
       ),
     ).toHaveLength(10);
   }, 120_000);
+
+  it.skipIf(!existsSync(PAYLOAD_BINDING_REPAIR_FIXTURE))(
+    "repairs payload binding without changing the first passport and verifies aggregate evidence",
+    async () => {
+      const transferDemo = await runCli(
+        ["demo", "TRANSFER_IDEMPOTENCY", "--replay", "--json"],
+        { timeoutMs: 120_000 },
+      );
+      expect(transferDemo.code).toBe(0);
+      expect(parseCleanJson(transferDemo)).toMatchObject({
+        status: "PASSED",
+        mode: "record-replay",
+        invariantId: "TRANSFER_IDEMPOTENCY",
+        humanApprovalRequired: true,
+      });
+      const transferPassportPath = resolve(
+        REPOSITORY_ROOT,
+        TRANSFER_EVIDENCE_DIRECTORY,
+        "passport.json",
+      );
+      const transferPassportBeforePayloadRepair = await readFile(
+        transferPassportPath,
+        "utf8",
+      );
+
+      const attack = await runCli([
+        "attack",
+        "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+        "--target",
+        "vulnerable",
+        "--json",
+      ]);
+      expect(attack.code).toBe(10);
+      expect(parseCleanJson(attack)).toMatchObject({
+        invariantId: "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+        status: "FAILED",
+        counterexampleArtifact: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/counterexample.json`,
+      });
+
+      const repair = await runCli(
+        ["repair", "IDEMPOTENCY_KEY_PAYLOAD_BINDING", "--replay", "--json"],
+        { timeoutMs: 120_000 },
+      );
+      expect(repair.code).toBe(0);
+      const repairResult = asRecord(
+        parseCleanJson(repair),
+        "payload-binding repair result",
+      );
+      expect(repairResult).toMatchObject({
+        schemaVersion: "1.0.0",
+        invariantId: "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+        mode: "record-replay",
+        status: "SUCCEEDED",
+        humanApprovalRequired: true,
+        approvalStatus: "PENDING",
+        committed: false,
+        merged: false,
+        artifacts: {
+          request: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/repair-request.json`,
+          report: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/repair-report.json`,
+          diff: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/repair.diff`,
+        },
+      });
+      expect(repairResult.patchSha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(asArray(repairResult.attempts, "repair attempts")).toHaveLength(1);
+      expect(
+        asArray(repairResult.changedFiles, "repair changed files"),
+      ).toEqual([
+        "examples/vulnerable-wallet-api/src/payload-blind-wallet-store.ts",
+        "examples/vulnerable-wallet-api/tests/idempotency-key-payload-binding.regression.test.ts",
+      ]);
+      const validationResults = asArray(
+        repairResult.validationResults,
+        "repair validation results",
+      );
+      expect(
+        validationResults.map(
+          (validation) => asRecord(validation, "repair validation").id,
+        ),
+      ).toEqual(["non-regression-test", "exact-attack-replay"]);
+      expect(
+        validationResults.every(
+          (validation) =>
+            asRecord(validation, "repair validation").passed === true,
+        ),
+      ).toBe(true);
+      expect(
+        existsSync(
+          resolve(
+            REPOSITORY_ROOT,
+            ".qedra/worktrees/idempotency-key-payload-binding",
+          ),
+        ),
+      ).toBe(false);
+
+      const generated = await runCli(
+        ["passport", "IDEMPOTENCY_KEY_PAYLOAD_BINDING", "--json"],
+        { timeoutMs: 60_000 },
+      );
+      expect(generated.code).toBe(0);
+      expect(parseCleanJson(generated)).toMatchObject({
+        schemaVersion: "1.0.0",
+        status: "GENERATED",
+        humanApprovalRequired: true,
+        artifacts: {
+          json: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/passport.json`,
+          html: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/passport.html`,
+          liveRepairBlocker: `${PAYLOAD_BINDING_EVIDENCE_DIRECTORY}/live-repair-blocker.json`,
+        },
+      });
+      expect(await readFile(transferPassportPath, "utf8")).toBe(
+        transferPassportBeforePayloadRepair,
+      );
+
+      const payloadPassport = asRecord(
+        JSON.parse(
+          await readFile(
+            resolve(
+              REPOSITORY_ROOT,
+              PAYLOAD_BINDING_EVIDENCE_DIRECTORY,
+              "passport.json",
+            ),
+            "utf8",
+          ),
+        ) as unknown,
+        "payload-binding passport",
+      );
+      expect(payloadPassport).toMatchObject({
+        schemaVersion: "1.0.0",
+        kind: "qedra.passport",
+        invariant: { id: "IDEMPOTENCY_KEY_PAYLOAD_BINDING" },
+        humanApprovalRequired: true,
+        attack: { status: "FAIL" },
+        repair: {
+          mode: "record-replay",
+          status: "replayed",
+          validation: { passed: true },
+          humanApprovalRequired: true,
+        },
+        replay: { status: "PASS" },
+        verification: { status: "PASS" },
+      });
+
+      const payloadVerification = await runCli(
+        ["passport", "IDEMPOTENCY_KEY_PAYLOAD_BINDING", "--verify", "--json"],
+        { timeoutMs: 60_000 },
+      );
+      expect(payloadVerification.code).toBe(0);
+      const payloadVerificationResult = asRecord(
+        parseCleanJson(payloadVerification),
+        "payload-binding passport verification",
+      );
+      expect(payloadVerificationResult).toMatchObject({
+        status: "VERIFIED",
+        evidenceHashValid: true,
+        embeddedRepairHashValid: true,
+        repairArtifactsValid: true,
+        passportHtmlMatches: true,
+        humanApprovalRequired: true,
+      });
+      expect(
+        asArray(
+          payloadVerificationResult.artifactChecks,
+          "payload-binding artifact checks",
+        ).every(
+          (check) =>
+            asRecord(check, "payload-binding artifact check").valid === true,
+        ),
+      ).toBe(true);
+
+      const aggregateGeneration = await runCli(
+        ["passport", "--all", "--json"],
+        { timeoutMs: 120_000 },
+      );
+      expect(aggregateGeneration.code).toBe(0);
+      const aggregateGenerationResult = asRecord(
+        parseCleanJson(aggregateGeneration),
+        "aggregate passport generation",
+      );
+      expect(aggregateGenerationResult).toMatchObject({
+        schemaVersion: "1.0.0",
+        status: "GENERATED",
+        artifacts: {
+          summary: "evidence/summary.json",
+          dashboardData: "evidence/dashboard/data.json",
+          dashboardHtml: "evidence/dashboard/index.html",
+        },
+        humanApprovalRequired: true,
+      });
+      expect(aggregateGenerationResult.summaryEvidenceHash).toMatch(
+        /^[a-f0-9]{64}$/u,
+      );
+      const evidenceHashes = asRecord(
+        aggregateGenerationResult.evidenceHashes,
+        "aggregate evidence hashes",
+      );
+      expect(evidenceHashes.TRANSFER_IDEMPOTENCY).toMatch(/^[a-f0-9]{64}$/u);
+      expect(evidenceHashes.IDEMPOTENCY_KEY_PAYLOAD_BINDING).toMatch(
+        /^[a-f0-9]{64}$/u,
+      );
+
+      const [summarySource, dashboardHtml] = await Promise.all([
+        readFile(resolve(REPOSITORY_ROOT, "evidence/summary.json"), "utf8"),
+        readFile(
+          resolve(REPOSITORY_ROOT, "evidence/dashboard/index.html"),
+          "utf8",
+        ),
+      ]);
+      expect(JSON.parse(summarySource)).toMatchObject({
+        kind: "qedra.evidence-summary",
+        humanApproval: { required: true, status: "PENDING" },
+        invariants: [
+          {
+            invariantId: "TRANSFER_IDEMPOTENCY",
+            evidenceDirectory: TRANSFER_EVIDENCE_DIRECTORY,
+            humanApproval: { required: true, status: "PENDING" },
+          },
+          {
+            invariantId: "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+            evidenceDirectory: PAYLOAD_BINDING_EVIDENCE_DIRECTORY,
+            humanApproval: { required: true, status: "PENDING" },
+          },
+        ],
+      });
+      expect(dashboardHtml).toContain("TRANSFER_IDEMPOTENCY");
+      expect(dashboardHtml).toContain("IDEMPOTENCY_KEY_PAYLOAD_BINDING");
+      expect(dashboardHtml).toContain("PENDING");
+
+      const aggregateVerification = await runCli(
+        ["passport", "--all", "--verify", "--json"],
+        { timeoutMs: 60_000 },
+      );
+      expect(aggregateVerification.code).toBe(0);
+      const aggregateVerificationResult = asRecord(
+        parseCleanJson(aggregateVerification),
+        "aggregate passport verification",
+      );
+      expect(aggregateVerificationResult).toMatchObject({
+        schemaVersion: "1.0.0",
+        status: "VERIFIED",
+        humanApprovalRequired: true,
+        summary: {
+          status: "VERIFIED",
+          invariantIds: [
+            "TRANSFER_IDEMPOTENCY",
+            "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+          ],
+          humanApprovalRequired: true,
+          approvalStatus: "PENDING",
+          error: null,
+        },
+      });
+      const bundles = asRecord(
+        aggregateVerificationResult.bundles,
+        "aggregate passport bundles",
+      );
+      for (const invariantId of [
+        "TRANSFER_IDEMPOTENCY",
+        "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+      ]) {
+        const bundle = asRecord(bundles[invariantId], `${invariantId} bundle`);
+        expect(bundle).toMatchObject({
+          status: "VERIFIED",
+          evidenceHashValid: true,
+          embeddedRepairHashValid: true,
+          repairArtifactsValid: true,
+          passportHtmlMatches: true,
+          humanApprovalRequired: true,
+        });
+        expect(
+          asArray(
+            bundle.artifactChecks,
+            `${invariantId} artifact checks`,
+          ).every(
+            (check) => asRecord(check, `${invariantId} artifact check`).valid,
+          ),
+        ).toBe(true);
+      }
+      expect(
+        existsSync(
+          resolve(
+            REPOSITORY_ROOT,
+            ".qedra/worktrees/idempotency-key-payload-binding",
+          ),
+        ),
+      ).toBe(false);
+      expect(
+        existsSync(
+          resolve(REPOSITORY_ROOT, ".qedra/worktrees/transfer-idempotency"),
+        ),
+      ).toBe(false);
+    },
+    360_000,
+  );
 });

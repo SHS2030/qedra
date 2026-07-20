@@ -20,31 +20,135 @@ import {
   type ValidationCommand,
   type WorktreeMutationContext,
 } from "../../git-adapter/src/index.js";
-import type { Counterexample } from "../../proof-passport/src/index.js";
+import {
+  parseAndVerifyCounterexample,
+  type Counterexample,
+} from "../../proof-passport/src/index.js";
 import {
   atomicWriteJson,
   atomicWriteText,
   readGitMetadata,
   sha256Hex,
 } from "../../shared/src/index.js";
+import {
+  invariantEvidencePaths,
+  isSupportedInvariantId,
+  type SupportedInvariantId,
+} from "./evidence-layout.js";
 
-export const REPAIR_REQUEST_PATH = "evidence/repair-request.json" as const;
-export const REPAIR_REPORT_PATH = "evidence/repair-report.json" as const;
-export const REPAIR_DIFF_PATH = "evidence/repair.diff" as const;
+const TRANSFER_EVIDENCE_PATHS = invariantEvidencePaths("TRANSFER_IDEMPOTENCY");
+
+export const REPAIR_REQUEST_PATH = TRANSFER_EVIDENCE_PATHS.repairRequest;
+export const REPAIR_REPORT_PATH = TRANSFER_EVIDENCE_PATHS.repairReport;
+export const REPAIR_DIFF_PATH = TRANSFER_EVIDENCE_PATHS.repairDiff;
 export const LIVE_REPAIR_REQUEST_PATH =
-  "evidence/live-repair-request.json" as const;
-export const LIVE_REPAIR_REPORT_PATH =
-  "evidence/live-repair-report.json" as const;
-export const LIVE_REPAIR_DIFF_PATH = "evidence/live-repair.diff" as const;
+  TRANSFER_EVIDENCE_PATHS.liveRepairRequest;
+export const LIVE_REPAIR_REPORT_PATH = TRANSFER_EVIDENCE_PATHS.liveRepairReport;
+export const LIVE_REPAIR_DIFF_PATH = TRANSFER_EVIDENCE_PATHS.liveRepairDiff;
 export const RECORDED_CHANGE_SET_PATH =
-  "evidence/recorded-change-set.json" as const;
+  TRANSFER_EVIDENCE_PATHS.recordedChangeSet;
 
-const RECORDED_PATCH_PATH =
-  "packages/codex-adapter/fixtures/TRANSFER_IDEMPOTENCY.patch" as const;
-const REPAIRED_FILES = [
-  "examples/vulnerable-wallet-api/src/vulnerable-wallet-store.ts",
-  "examples/vulnerable-wallet-api/tests/transfer-idempotency.regression.test.ts",
-] as const;
+interface RepairProfile {
+  readonly invariantId: SupportedInvariantId;
+  readonly requestId: string;
+  readonly recordedPatchPath: string;
+  readonly repairedFiles: readonly string[];
+  readonly validationCommands: readonly RepairRequest["validationCommands"][number][];
+  readonly prompt: string;
+}
+
+const REPAIR_PROFILES: Readonly<Record<SupportedInvariantId, RepairProfile>> = {
+  TRANSFER_IDEMPOTENCY: {
+    invariantId: "TRANSFER_IDEMPOTENCY",
+    requestId: "REPAIR-TRANSFER-IDEMPOTENCY-001",
+    recordedPatchPath:
+      "packages/codex-adapter/fixtures/TRANSFER_IDEMPOTENCY.patch",
+    repairedFiles: [
+      "examples/vulnerable-wallet-api/src/vulnerable-wallet-store.ts",
+      "examples/vulnerable-wallet-api/tests/transfer-idempotency.regression.test.ts",
+    ],
+    validationCommands: [
+      {
+        id: "non-regression-test",
+        command: process.execPath,
+        args: [
+          "--import",
+          "tsx",
+          "--test",
+          "examples/vulnerable-wallet-api/tests/transfer-idempotency.regression.test.ts",
+        ],
+        timeoutMs: 60_000,
+      },
+      {
+        id: "exact-attack-replay",
+        command: process.execPath,
+        args: [
+          "--import",
+          "tsx",
+          "packages/cli/src/bin.ts",
+          "verify",
+          "TRANSFER_IDEMPOTENCY",
+          "--target",
+          "vulnerable",
+          "--json",
+        ],
+        timeoutMs: 60_000,
+      },
+    ],
+    prompt: [
+      "Repair TRANSFER_IDEMPOTENCY in the deliberately vulnerable wallet fixture.",
+      "Use persistent request/result storage, a unique request constraint, and one atomic transaction.",
+      "Return the stored first result for every repeated request.",
+      "Add and pass a non-regression test for the recorded timeout-after-commit retry.",
+      "Modify only the allowed affected files. Do not commit, merge, push, or weaken validation.",
+    ].join("\n"),
+  },
+  IDEMPOTENCY_KEY_PAYLOAD_BINDING: {
+    invariantId: "IDEMPOTENCY_KEY_PAYLOAD_BINDING",
+    requestId: "REPAIR-IDEMPOTENCY-KEY-PAYLOAD-BINDING-001",
+    recordedPatchPath:
+      "packages/codex-adapter/fixtures/IDEMPOTENCY_KEY_PAYLOAD_BINDING.patch",
+    repairedFiles: [
+      "examples/vulnerable-wallet-api/src/payload-blind-wallet-store.ts",
+      "examples/vulnerable-wallet-api/tests/idempotency-key-payload-binding.regression.test.ts",
+    ],
+    validationCommands: [
+      {
+        id: "non-regression-test",
+        command: process.execPath,
+        args: [
+          "--import",
+          "tsx",
+          "--test",
+          "--test-name-pattern",
+          "non-regression",
+          "examples/vulnerable-wallet-api/tests/idempotency-key-payload-binding.regression.test.ts",
+        ],
+        timeoutMs: 60_000,
+      },
+      {
+        id: "exact-attack-replay",
+        command: process.execPath,
+        args: [
+          "--import",
+          "tsx",
+          "--test",
+          "--test-name-pattern",
+          "exact replay",
+          "examples/vulnerable-wallet-api/tests/idempotency-key-payload-binding.regression.test.ts",
+        ],
+        timeoutMs: 60_000,
+      },
+    ],
+    prompt: [
+      "Repair IDEMPOTENCY_KEY_PAYLOAD_BINDING in the deliberately payload-blind wallet fixture.",
+      "Bind each idempotency key to canonical source, destination, and amount semantics.",
+      "Return the stored first result for an exact retry and reject every conflicting payload with HTTP 409 and IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD.",
+      "Preserve balances and ledger entries on every conflict and pass the exact recorded replay.",
+      "Modify only the allowed affected files. Do not commit, merge, push, or weaken validation.",
+    ].join("\n"),
+  },
+};
 const SENSITIVE_VALIDATION_ENVIRONMENT_VARIABLES = [
   "OPENAI_API_KEY",
   "CODEX_API_KEY",
@@ -58,49 +162,20 @@ export interface RepairArtifactPaths {
 
 export function repairArtifactPaths(
   mode: RepairRequest["mode"],
+  invariantId: SupportedInvariantId = "TRANSFER_IDEMPOTENCY",
 ): RepairArtifactPaths {
+  const paths = invariantEvidencePaths(invariantId);
   return mode === "live"
     ? {
-        request: LIVE_REPAIR_REQUEST_PATH,
-        report: LIVE_REPAIR_REPORT_PATH,
-        diff: LIVE_REPAIR_DIFF_PATH,
+        request: paths.liveRepairRequest,
+        report: paths.liveRepairReport,
+        diff: paths.liveRepairDiff,
       }
     : {
-        request: REPAIR_REQUEST_PATH,
-        report: REPAIR_REPORT_PATH,
-        diff: REPAIR_DIFF_PATH,
+        request: paths.repairRequest,
+        report: paths.repairReport,
+        diff: paths.repairDiff,
       };
-}
-
-function validationCommands(): readonly RepairRequest["validationCommands"][number][] {
-  return [
-    {
-      id: "non-regression-test",
-      command: process.execPath,
-      args: [
-        "--import",
-        "tsx",
-        "--test",
-        "examples/vulnerable-wallet-api/tests/transfer-idempotency.regression.test.ts",
-      ],
-      timeoutMs: 60_000,
-    },
-    {
-      id: "exact-attack-replay",
-      command: process.execPath,
-      args: [
-        "--import",
-        "tsx",
-        "packages/cli/src/bin.ts",
-        "verify",
-        "TRANSFER_IDEMPOTENCY",
-        "--target",
-        "vulnerable",
-        "--json",
-      ],
-      timeoutMs: 60_000,
-    },
-  ];
 }
 
 export async function buildRepairRequest(
@@ -109,17 +184,41 @@ export async function buildRepairRequest(
   mode: "live" | "record-replay",
   createdAt = new Date().toISOString(),
 ): Promise<RepairRequest> {
+  if (!isSupportedInvariantId(counterexample.invariant.id)) {
+    throw new Error(
+      `Unsupported repair invariant: ${counterexample.invariant.id}`,
+    );
+  }
+  const profile = REPAIR_PROFILES[counterexample.invariant.id];
+  const paths = invariantEvidencePaths(profile.invariantId);
   const git = await readGitMetadata(repositoryRoot);
   if (git.commit === null) {
     throw new Error("A committed Git base is required for an isolated repair.");
   }
-  const counterexampleArtifactPath = "evidence/counterexample.json" as const;
-  const counterexampleSha256 = sha256Hex(
-    await readFile(resolve(repositoryRoot, counterexampleArtifactPath)),
+  if (counterexample.repository.commit !== git.commit) {
+    throw new Error(
+      "The counterexample commit must match the isolated repair base commit.",
+    );
+  }
+  const counterexampleArtifactPath = paths.counterexample;
+  const counterexampleBytes = await readFile(
+    resolve(repositoryRoot, counterexampleArtifactPath),
   );
+  const storedCounterexample = parseAndVerifyCounterexample(
+    JSON.parse(counterexampleBytes.toString("utf8")) as unknown,
+  );
+  if (
+    storedCounterexample.evidenceHash !== counterexample.evidenceHash ||
+    storedCounterexample.invariant.id !== profile.invariantId
+  ) {
+    throw new Error(
+      "The stored counterexample does not match the requested invariant evidence.",
+    );
+  }
+  const counterexampleSha256 = sha256Hex(counterexampleBytes);
   return {
     schemaVersion: "qedra.repair-request.v1",
-    requestId: "REPAIR-TRANSFER_IDEMPOTENCY-001",
+    requestId: profile.requestId,
     mode,
     invariant: counterexample.invariant,
     scenario: {
@@ -133,22 +232,11 @@ export async function buildRepairRequest(
       path: repositoryRoot,
       baseRef: git.commit,
       baseCommit: git.commit,
-      isolatedWorktreePath: resolve(
-        repositoryRoot,
-        ".qedra",
-        "worktrees",
-        "transfer-idempotency",
-      ),
-      affectedFiles: REPAIRED_FILES,
+      isolatedWorktreePath: resolve(repositoryRoot, paths.worktree),
+      affectedFiles: profile.repairedFiles,
     },
-    prompt: [
-      "Repair TRANSFER_IDEMPOTENCY in the deliberately vulnerable wallet fixture.",
-      "Use persistent request/result storage, a unique request constraint, and one atomic transaction.",
-      "Return the stored first result for every repeated request.",
-      "Add and pass a non-regression test for the recorded timeout-after-commit retry.",
-      "Modify only the allowed affected files. Do not commit, merge, push, or weaken validation.",
-    ].join("\n"),
-    validationCommands: validationCommands(),
+    prompt: profile.prompt,
+    validationCommands: profile.validationCommands,
     limits: {
       maxAttempts: 3,
       attemptTimeoutMs: 120_000,
@@ -165,6 +253,10 @@ async function writeRepairArtifacts(
   result: RepairResult,
   changeSet?: RecordedChangeSet,
 ): Promise<void> {
+  if (!isSupportedInvariantId(request.invariant.id)) {
+    throw new Error(`Unsupported repair invariant: ${request.invariant.id}`);
+  }
+  const paths = invariantEvidencePaths(request.invariant.id);
   const writeSet = async (paths: RepairArtifactPaths): Promise<void> => {
     await atomicWriteJson(resolve(repositoryRoot, paths.request), request);
     await atomicWriteJson(resolve(repositoryRoot, paths.report), result);
@@ -174,16 +266,16 @@ async function writeRepairArtifacts(
     );
   };
   await writeSet({
-    request: REPAIR_REQUEST_PATH,
-    report: REPAIR_REPORT_PATH,
-    diff: REPAIR_DIFF_PATH,
+    request: paths.repairRequest,
+    report: paths.repairReport,
+    diff: paths.repairDiff,
   });
   if (request.mode === "live") {
-    await writeSet(repairArtifactPaths("live"));
+    await writeSet(repairArtifactPaths("live", request.invariant.id));
   }
   if (changeSet !== undefined) {
     await atomicWriteJson(
-      resolve(repositoryRoot, RECORDED_CHANGE_SET_PATH),
+      resolve(repositoryRoot, paths.recordedChangeSet),
       changeSet,
     );
   }
@@ -205,8 +297,12 @@ export async function executeRecordedRepair(
     counterexample,
     "record-replay",
   );
+  if (!isSupportedInvariantId(request.invariant.id)) {
+    throw new Error(`Unsupported repair invariant: ${request.invariant.id}`);
+  }
+  const profile = REPAIR_PROFILES[request.invariant.id];
   const patch = await readFile(
-    resolve(repositoryRoot, RECORDED_PATCH_PATH),
+    resolve(repositoryRoot, profile.recordedPatchPath),
     "utf8",
   );
   const changeSet = createRecordedChangeSet({
@@ -214,7 +310,7 @@ export async function executeRecordedRepair(
     invariantId: request.invariant.id,
     baseCommit: request.repository.baseCommit,
     patch,
-    affectedFiles: REPAIRED_FILES,
+    affectedFiles: profile.repairedFiles,
     recordedAt: request.createdAt,
   });
   const result = await replayRecordedChangeSet(

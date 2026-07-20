@@ -24,3 +24,28 @@ invariants:
         destinationBalance: 6000
         debitEntries: 1
         creditEntries: 1
+  - id: IDEMPOTENCY_KEY_PAYLOAD_BINDING
+    version: 1
+    title: Idempotency key payload binding
+    statement: The same idempotency key must never be accepted for two semantically different transfer requests.
+    severity: critical
+    enabled: true
+    tags:
+      - payments
+      - idempotency
+      - payload-integrity
+    scenario:
+      id: idempotency-key-payload-conflict
+      deterministicSeed: qedra-idempotency-key-payload-binding-seed-v1
+      description: Commit TX-001, then reuse its idempotency key with a different amount, destination, and source.
+      attackCommand: node --import tsx packages/cli/src/bin.ts attack IDEMPOTENCY_KEY_PAYLOAD_BINDING --target vulnerable --json
+      verificationCommand: node --import tsx packages/cli/src/bin.ts verify IDEMPOTENCY_KEY_PAYLOAD_BINDING --target fixed --json
+      timeoutMs: 30000
+      expectedState:
+        sourceBalance: 9000
+        destinationBalance: 6000
+        alternateDestinationBalance: 2000
+        ledgerEntries: 2
+        conflictStatusCode: 409
+        conflictError: IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD
+        identicalRetryStatusCode: 200

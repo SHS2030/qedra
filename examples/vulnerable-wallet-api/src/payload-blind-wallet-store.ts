@@ -4,16 +4,13 @@ import { DatabaseSync } from "node:sqlite";
 
 import {
   DEFAULT_WALLETS,
-  IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD,
+  financialPayloadFingerprint,
+  WalletStoreError,
   type LedgerDirection,
   type LedgerEntry,
   type TransferInput,
   type TransferResult,
-} from "./types.js";
-import {
-  financialPayloadFingerprint,
-  sameFinancialPayload,
-} from "./financial-payload.js";
+} from "../../../packages/core/src/index.js";
 
 interface WalletRow {
   readonly wallet_id: string;
@@ -21,22 +18,7 @@ interface WalletRow {
 }
 
 interface StoredTransferRow {
-  readonly source_wallet_id: string;
-  readonly destination_wallet_id: string;
-  readonly amount: number;
-  readonly payload_fingerprint: string;
   readonly response_json: string;
-}
-
-interface TransferTableColumn {
-  readonly name: string;
-}
-
-interface TransferPayloadRow {
-  readonly request_id: string;
-  readonly source_wallet_id: string;
-  readonly destination_wallet_id: string;
-  readonly amount: number;
 }
 
 interface LedgerRow {
@@ -48,40 +30,29 @@ interface LedgerRow {
   readonly balance_after: number;
 }
 
-export interface WalletStoreOptions {
-  readonly databasePath?: string;
-}
-
-export class WalletStoreError extends Error {
-  public constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode: number,
-  ) {
-    super(message);
-    this.name = "WalletStoreError";
-  }
-}
-
-function databasePathFrom(
-  options: WalletStoreOptions | string | undefined,
-): string {
-  if (typeof options === "string") {
-    return options;
-  }
-
-  return options?.databasePath ?? ":memory:";
-}
-
 function ensureDatabaseDirectory(databasePath: string): void {
   if (databasePath === ":memory:" || databasePath.startsWith("file:")) {
     return;
   }
-
   mkdirSync(dirname(resolve(databasePath)), { recursive: true });
 }
 
-function asSafeInteger(value: unknown, field: string, minimum: number): number {
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new WalletStoreError(
+      "INVALID_INPUT",
+      `${field} must be a non-empty string.`,
+      400,
+    );
+  }
+  return value;
+}
+
+function requireInteger(
+  value: unknown,
+  field: string,
+  minimum: number,
+): number {
   if (
     typeof value !== "number" ||
     !Number.isSafeInteger(value) ||
@@ -93,19 +64,6 @@ function asSafeInteger(value: unknown, field: string, minimum: number): number {
       400,
     );
   }
-
-  return value;
-}
-
-function asNonEmptyString(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new WalletStoreError(
-      "INVALID_INPUT",
-      `${field} must be a non-empty string.`,
-      400,
-    );
-  }
-
   return value;
 }
 
@@ -118,26 +76,28 @@ function parseStoredResult(serialized: string): TransferResult {
       500,
     );
   }
-
   return parsed as TransferResult;
 }
 
-export class WalletStore {
+/**
+ * Deliberately vulnerable fixture for IDEMPOTENCY_KEY_PAYLOAD_BINDING.
+ *
+ * It persists the first result by request id, but accepts every later payload
+ * carrying that id and blindly returns the first response. The fixture stores
+ * a payload fingerprint to make the missing comparison explicit and
+ * reproducible; the recorded repair activates deterministic binding.
+ */
+export class PayloadBlindWalletStore {
   private readonly database: DatabaseSync;
   private closed = false;
 
-  public constructor(options?: WalletStoreOptions | string) {
-    const databasePath = databasePathFrom(options);
+  public constructor(databasePath = ":memory:") {
     ensureDatabaseDirectory(databasePath);
     this.database = new DatabaseSync(databasePath);
     this.database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
     if (databasePath !== ":memory:") {
       this.database.exec("PRAGMA journal_mode = WAL;");
     }
-    this.createSchema();
-  }
-
-  private createSchema(): void {
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS wallets (
         wallet_id TEXT PRIMARY KEY,
@@ -163,40 +123,9 @@ export class WalletStore {
         FOREIGN KEY (wallet_id) REFERENCES wallets(wallet_id)
       ) STRICT;
 
-      CREATE INDEX IF NOT EXISTS ledger_request_id_idx ON ledger(request_id, id);
+      CREATE INDEX IF NOT EXISTS payload_blind_ledger_request_idx
+      ON ledger(request_id, id);
     `);
-    this.migratePayloadFingerprint();
-  }
-
-  private migratePayloadFingerprint(): void {
-    const columns = this.database
-      .prepare("PRAGMA table_info(transfers)")
-      .all() as unknown as readonly TransferTableColumn[];
-    if (columns.some((column) => column.name === "payload_fingerprint")) {
-      return;
-    }
-
-    this.database.exec(
-      "ALTER TABLE transfers ADD COLUMN payload_fingerprint TEXT;",
-    );
-    const rows = this.database
-      .prepare(
-        "SELECT request_id, source_wallet_id, destination_wallet_id, amount FROM transfers",
-      )
-      .all() as unknown as readonly TransferPayloadRow[];
-    const update = this.database.prepare(
-      "UPDATE transfers SET payload_fingerprint = ? WHERE request_id = ?",
-    );
-    for (const row of rows) {
-      update.run(
-        financialPayloadFingerprint({
-          sourceWalletId: row.source_wallet_id,
-          destinationWalletId: row.destination_wallet_id,
-          amount: row.amount,
-        }),
-        row.request_id,
-      );
-    }
   }
 
   public reset(): void {
@@ -230,7 +159,6 @@ export class WalletStore {
         400,
       );
     }
-
     this.database.exec("BEGIN IMMEDIATE;");
     try {
       const upsert = this.database.prepare(`
@@ -239,8 +167,8 @@ export class WalletStore {
         ON CONFLICT(wallet_id) DO UPDATE SET balance = excluded.balance
       `);
       for (const [walletIdValue, balanceValue] of entries) {
-        const walletId = asNonEmptyString(walletIdValue, "walletId");
-        const balance = asSafeInteger(
+        const walletId = requireString(walletIdValue, "walletId");
+        const balance = requireInteger(
           balanceValue,
           `balance for ${walletId}`,
           0,
@@ -256,17 +184,16 @@ export class WalletStore {
 
   public transfer(input: TransferInput): TransferResult {
     this.assertOpen();
-    const requestId = asNonEmptyString(input.requestId, "requestId");
-    const sourceWalletId = asNonEmptyString(
+    const requestId = requireString(input.requestId, "requestId");
+    const sourceWalletId = requireString(
       input.sourceWalletId,
       "sourceWalletId",
     );
-    const destinationWalletId = asNonEmptyString(
+    const destinationWalletId = requireString(
       input.destinationWalletId,
       "destinationWalletId",
     );
-    const amount = asSafeInteger(input.amount, "amount", 1);
-
+    const amount = requireInteger(input.amount, "amount", 1);
     if (sourceWalletId === destinationWalletId) {
       throw new WalletStoreError(
         "INVALID_INPUT",
@@ -278,41 +205,18 @@ export class WalletStore {
     this.database.exec("BEGIN IMMEDIATE;");
     try {
       const stored = this.database
-        .prepare(
-          `
-            SELECT source_wallet_id, destination_wallet_id, amount,
-                   payload_fingerprint, response_json
-            FROM transfers
-            WHERE request_id = ?
-          `,
-        )
+        .prepare("SELECT response_json FROM transfers WHERE request_id = ?")
         .get(requestId) as StoredTransferRow | undefined;
 
       if (stored !== undefined) {
-        if (
-          !sameFinancialPayload(
-            {
-              sourceWalletId: stored.source_wallet_id,
-              destinationWalletId: stored.destination_wallet_id,
-              amount: stored.amount,
-              payloadFingerprint: stored.payload_fingerprint,
-            },
-            { sourceWalletId, destinationWalletId, amount },
-          )
-        ) {
-          throw new WalletStoreError(
-            IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD,
-            "The idempotency key is already bound to a different transfer payload.",
-            409,
-          );
-        }
+        // Intentionally unsafe: the incoming financial payload is ignored.
         const result = parseStoredResult(stored.response_json);
         this.database.exec("COMMIT;");
         return result;
       }
 
-      const source = this.getWalletRow(sourceWalletId);
-      const destination = this.getWalletRow(destinationWalletId);
+      const source = this.wallet(sourceWalletId);
+      const destination = this.wallet(destinationWalletId);
       if (source === undefined || destination === undefined) {
         throw new WalletStoreError(
           "WALLET_NOT_FOUND",
@@ -355,7 +259,6 @@ export class WalletStore {
         amount,
         destinationBalance,
       );
-
       const result: TransferResult = {
         requestId,
         sourceWalletId,
@@ -371,19 +274,14 @@ export class WalletStore {
           Number(credit.lastInsertRowid),
         ],
       };
-
       this.database
         .prepare(
           `
-          INSERT INTO transfers (
-            request_id,
-            source_wallet_id,
-            destination_wallet_id,
-            amount,
-            payload_fingerprint,
-            response_json
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        `,
+            INSERT INTO transfers (
+              request_id, source_wallet_id, destination_wallet_id, amount,
+              payload_fingerprint, response_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+          `,
         )
         .run(
           requestId,
@@ -410,11 +308,7 @@ export class WalletStore {
     const rows = this.database
       .prepare("SELECT wallet_id, balance FROM wallets ORDER BY wallet_id")
       .all() as unknown as readonly WalletRow[];
-    const balances: Record<string, number> = {};
-    for (const row of rows) {
-      balances[row.wallet_id] = row.balance;
-    }
-    return balances;
+    return Object.fromEntries(rows.map((row) => [row.wallet_id, row.balance]));
   }
 
   public getLedger(requestId?: string): readonly LedgerEntry[] {
@@ -422,24 +316,16 @@ export class WalletStore {
     const rows = (requestId === undefined
       ? this.database
           .prepare(
-            `
-              SELECT id, request_id, wallet_id, direction, amount, balance_after
-              FROM ledger
-              ORDER BY id
-            `,
+            `SELECT id, request_id, wallet_id, direction, amount, balance_after
+             FROM ledger ORDER BY id`,
           )
           .all()
       : this.database
           .prepare(
-            `
-              SELECT id, request_id, wallet_id, direction, amount, balance_after
-              FROM ledger
-              WHERE request_id = ?
-              ORDER BY id
-            `,
+            `SELECT id, request_id, wallet_id, direction, amount, balance_after
+             FROM ledger WHERE request_id = ? ORDER BY id`,
           )
           .all(requestId)) as unknown as readonly LedgerRow[];
-
     return rows.map((row) => ({
       id: row.id,
       requestId: row.request_id,
@@ -457,7 +343,7 @@ export class WalletStore {
     }
   }
 
-  private getWalletRow(walletId: string): WalletRow | undefined {
+  private wallet(walletId: string): WalletRow | undefined {
     return this.database
       .prepare("SELECT wallet_id, balance FROM wallets WHERE wallet_id = ?")
       .get(walletId) as WalletRow | undefined;
@@ -467,7 +353,7 @@ export class WalletStore {
     try {
       this.database.exec("ROLLBACK;");
     } catch {
-      // The original error remains authoritative when no transaction is active.
+      // Preserve the original failure.
     }
   }
 

@@ -2,6 +2,9 @@ export const DEFAULT_WALLETS = Object.freeze({ A: 10_000, B: 5_000 });
 
 export const TIMEOUT_AFTER_COMMIT = "timeout-after-commit" as const;
 
+export const IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD =
+  "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD" as const;
+
 export type FailureMode = typeof TIMEOUT_AFTER_COMMIT;
 
 export interface TransferInput {

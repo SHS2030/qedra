@@ -9,7 +9,12 @@ import {
 } from "./counterexample.js";
 import { runDoctor, type DoctorReport, type ToolDiagnostic } from "./doctor.js";
 import { ExitCode, type ExitCodeValue } from "./exit-codes.js";
-import { runDemo, type DemoResult } from "./demo.js";
+import {
+  runAllDemos,
+  runDemo,
+  type AllDemoResult,
+  type DemoResult,
+} from "./demo.js";
 import { type CliIo, processIo, writeJson } from "./output.js";
 import {
   generatePassportFromStoredArtifacts,
@@ -21,6 +26,23 @@ import {
   type ProofLoopRun,
   type ProofTarget,
 } from "./proof-loop.js";
+import {
+  buildPayloadBindingCounterexample,
+  PAYLOAD_BINDING_COUNTEREXAMPLE_PATH,
+  readPayloadBindingCounterexample,
+  runPayloadBindingProofLoop,
+  writePayloadBindingCounterexample,
+  type PayloadBindingProofLoopRun,
+} from "./payload-binding.js";
+import {
+  isSupportedInvariantId,
+  SUPPORTED_INVARIANT_IDS,
+  type SupportedInvariantId,
+} from "./evidence-layout.js";
+import {
+  generateEvidenceSummary,
+  verifyEvidenceSummary,
+} from "./evidence-summary.js";
 import {
   executeLiveRepair,
   executeRecordedRepair,
@@ -60,8 +82,10 @@ function commandJsonOption(command: Command): boolean {
   return local.json === true || global.json === true;
 }
 
-function requireInvariant(invariant: string): void {
-  if (invariant !== "TRANSFER_IDEMPOTENCY") {
+function requireInvariant(
+  invariant: string,
+): asserts invariant is SupportedInvariantId {
+  if (!isSupportedInvariantId(invariant)) {
     throw new Error(`Unsupported invariant: ${invariant}`);
   }
 }
@@ -75,7 +99,10 @@ function proofTarget(value: string): ProofTarget {
   return value;
 }
 
-function proofLoopOutput(run: ProofLoopRun, artifact: string | null): object {
+function proofLoopOutput(
+  run: ProofLoopRun | PayloadBindingProofLoopRun,
+  artifact: string | null,
+): object {
   return {
     schemaVersion: "1.0.0",
     invariantId: run.verification.invariantId,
@@ -90,6 +117,31 @@ function proofLoopOutput(run: ProofLoopRun, artifact: string | null): object {
     counterexampleArtifact: artifact,
     durationMs: run.durationMs,
   };
+}
+
+function formatPayloadBindingProofLoop(
+  run: PayloadBindingProofLoopRun,
+  artifact: string | null,
+): string {
+  const actual = run.verification.actual;
+  const lines = [
+    `IDEMPOTENCY_KEY_PAYLOAD_BINDING ${run.verification.status}`,
+    `Target: ${run.target}`,
+    `Different amount: HTTP ${String(actual.amountConflictStatus)} (${actual.amountConflictError ?? "no conflict error"})`,
+    `Different destination: HTTP ${String(actual.destinationConflictStatus)} (${actual.destinationConflictError ?? "no conflict error"})`,
+    `Different source: HTTP ${String(actual.sourceConflictStatus)} (${actual.sourceConflictError ?? "no conflict error"})`,
+    `Identical retry returned first result: ${String(actual.identicalRetryMatchesInitialResult)}`,
+    `Balances: A=${String(actual.balances.A)} FCFA, B=${String(actual.balances.B)} FCFA, C=${String(actual.balances.C)} FCFA`,
+    `Ledger entries for TX-001: ${String(actual.ledgerEntries)}`,
+    `Exact attack hash: ${run.scenario.attackRequestHash}`,
+  ];
+  if (artifact !== null) {
+    lines.push(`Counterexample: ${artifact}`);
+  }
+  for (const violation of run.verification.violations) {
+    lines.push(`  - ${violation.code}: ${violation.message}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function formatProofLoop(run: ProofLoopRun, artifact: string | null): string {
@@ -113,7 +165,15 @@ function formatProofLoop(run: ProofLoopRun, artifact: string | null): string {
 }
 
 function repairOutput(execution: RepairExecution): object {
-  const paths = repairArtifactPaths(execution.request.mode);
+  if (!isSupportedInvariantId(execution.request.invariant.id)) {
+    throw new Error(
+      `Unsupported repair invariant: ${execution.request.invariant.id}`,
+    );
+  }
+  const paths = repairArtifactPaths(
+    execution.request.mode,
+    execution.request.invariant.id,
+  );
   return {
     schemaVersion: "1.0.0",
     invariantId: execution.request.invariant.id,
@@ -137,10 +197,18 @@ function repairOutput(execution: RepairExecution): object {
 }
 
 function formatRepair(execution: RepairExecution): string {
-  const paths = repairArtifactPaths(execution.request.mode);
+  if (!isSupportedInvariantId(execution.request.invariant.id)) {
+    throw new Error(
+      `Unsupported repair invariant: ${execution.request.invariant.id}`,
+    );
+  }
+  const paths = repairArtifactPaths(
+    execution.request.mode,
+    execution.request.invariant.id,
+  );
   const validations = execution.result.validationResults ?? [];
   const lines = [
-    `TRANSFER_IDEMPOTENCY repair ${execution.result.status}`,
+    `${execution.request.invariant.id} repair ${execution.result.status}`,
     `Mode: ${execution.request.mode}`,
     `Attempts: ${String(execution.result.attempts.length)} / ${String(execution.request.limits.maxAttempts)}`,
     `Changed files: ${(execution.result.changedFiles ?? []).join(", ") || "none"}`,
@@ -236,6 +304,23 @@ function formatDemo(result: DemoResult): string {
   return `${lines.join("\n")}\n`;
 }
 
+function formatAllDemo(result: AllDemoResult): string {
+  const lines = [
+    `QEDRA two-law demo ${result.status}`,
+    `Mode: ${result.mode}`,
+    ...result.laws.map(
+      (law) =>
+        `${law.invariantId}: attack=${displayRecordField(law.attack, "status")}, repair=${displayRecordField(law.repair, "status")}, replay=${displayRecordField(law.replay, "status")}, verification=${displayRecordField(law.verification, "status")}`,
+    ),
+    `Aggregate evidence: ${displayRecordField(result.summary, "status")}`,
+    `Human approval: PENDING (required)`,
+    ...Object.entries(result.artifacts).map(
+      ([name, path]) => `${name}: ${path}`,
+    ),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
 export async function runCli(
   args: readonly string[],
   io: CliIo = processIo,
@@ -313,14 +398,22 @@ export async function runCli(
         requireInvariant(invariant);
         const repositoryRoot = await findRepositoryRoot();
         await initConstitution(repositoryRoot);
-        const run = await runProofLoop(
-          repositoryRoot,
-          proofTarget(options.target),
-        );
+        const target = proofTarget(options.target);
+        const run =
+          invariant === "TRANSFER_IDEMPOTENCY"
+            ? await runProofLoop(repositoryRoot, target)
+            : await runPayloadBindingProofLoop(repositoryRoot, target);
         if (commandJsonOption(command)) {
           writeJson(io, proofLoopOutput(run, null));
         } else {
-          io.stdout(formatProofLoop(run, null));
+          io.stdout(
+            invariant === "TRANSFER_IDEMPOTENCY"
+              ? formatProofLoop(run as ProofLoopRun, null)
+              : formatPayloadBindingProofLoop(
+                  run as PayloadBindingProofLoopRun,
+                  null,
+                ),
+          );
         }
         exitCode = run.verification.passed
           ? ExitCode.SUCCESS
@@ -347,24 +440,45 @@ export async function runCli(
         requireInvariant(invariant);
         const repositoryRoot = await findRepositoryRoot();
         await initConstitution(repositoryRoot);
-        const run = await runProofLoop(
-          repositoryRoot,
-          proofTarget(options.target),
-        );
+        const target = proofTarget(options.target);
+        const run =
+          invariant === "TRANSFER_IDEMPOTENCY"
+            ? await runProofLoop(repositoryRoot, target)
+            : await runPayloadBindingProofLoop(repositoryRoot, target);
         let artifact: string | null = null;
         if (!run.verification.passed) {
-          const counterexample = await buildCounterexample(
-            repositoryRoot,
-            run.scenario,
-            run.verification,
-          );
-          await writeCounterexample(repositoryRoot, counterexample);
-          artifact = COUNTEREXAMPLE_PATH;
+          if (invariant === "TRANSFER_IDEMPOTENCY") {
+            const transferRun = run as ProofLoopRun;
+            const counterexample = await buildCounterexample(
+              repositoryRoot,
+              transferRun.scenario,
+              transferRun.verification,
+            );
+            await writeCounterexample(repositoryRoot, counterexample);
+            artifact = COUNTEREXAMPLE_PATH;
+          } else {
+            const counterexample = await buildPayloadBindingCounterexample(
+              repositoryRoot,
+              run as PayloadBindingProofLoopRun,
+            );
+            await writePayloadBindingCounterexample(
+              repositoryRoot,
+              counterexample,
+            );
+            artifact = PAYLOAD_BINDING_COUNTEREXAMPLE_PATH;
+          }
         }
         if (commandJsonOption(command)) {
           writeJson(io, proofLoopOutput(run, artifact));
         } else {
-          io.stdout(formatProofLoop(run, artifact));
+          io.stdout(
+            invariant === "TRANSFER_IDEMPOTENCY"
+              ? formatProofLoop(run as ProofLoopRun, artifact)
+              : formatPayloadBindingProofLoop(
+                  run as PayloadBindingProofLoopRun,
+                  artifact,
+                ),
+          );
         }
         exitCode = run.verification.passed
           ? ExitCode.SUCCESS
@@ -394,7 +508,10 @@ export async function runCli(
           throw new Error("Choose either --live or --replay, not both.");
         }
         const repositoryRoot = await findRepositoryRoot();
-        const counterexample = await readCounterexample(repositoryRoot);
+        const counterexample =
+          invariant === "TRANSFER_IDEMPOTENCY"
+            ? await readCounterexample(repositoryRoot)
+            : await readPayloadBindingCounterexample(repositoryRoot);
         const execution = await withProcessCancellation(async (signal) =>
           options.live
             ? await executeLiveRepair(repositoryRoot, counterexample, signal)
@@ -421,66 +538,166 @@ export async function runCli(
   program
     .command("passport")
     .description("generate or verify the machine-verifiable evidence passport")
+    .argument("[invariant]", "invariant ID", "TRANSFER_IDEMPOTENCY")
     .option("--verify", "verify hashes and every referenced artifact", false)
+    .option("--all", "generate or verify both invariant bundles", false)
     .option("--json", "emit one machine-readable JSON document")
-    .action(async (options: { verify: boolean }, command: Command) => {
-      const repositoryRoot = await findRepositoryRoot();
-      if (options.verify) {
-        const result = await verifyPassportBundle(repositoryRoot);
+    .action(
+      async (
+        invariant: string,
+        options: { verify: boolean; all: boolean },
+        command: Command,
+      ) => {
+        requireInvariant(invariant);
+        const repositoryRoot = await findRepositoryRoot();
+        if (options.all) {
+          if (options.verify) {
+            const bundles = await Promise.all(
+              SUPPORTED_INVARIANT_IDS.map(async (invariantId) => ({
+                invariantId,
+                verification: await verifyPassportBundle(
+                  repositoryRoot,
+                  invariantId,
+                ),
+              })),
+            );
+            const summary = await verifyEvidenceSummary(repositoryRoot);
+            const result = {
+              schemaVersion: "1.0.0",
+              status:
+                bundles.every(
+                  ({ verification }) => verification.status === "VERIFIED",
+                ) && summary.status === "VERIFIED"
+                  ? "VERIFIED"
+                  : "INVALID",
+              bundles: Object.fromEntries(
+                bundles.map(({ invariantId, verification }) => [
+                  invariantId,
+                  verification,
+                ]),
+              ),
+              summary,
+              humanApprovalRequired: true,
+            } as const;
+            if (commandJsonOption(command)) {
+              writeJson(io, result);
+            } else {
+              io.stdout(
+                `QEDRA aggregate evidence ${result.status}\n${SUPPORTED_INVARIANT_IDS.map((id) => `${id}: ${result.bundles[id]?.status ?? "INVALID"}`).join("\n")}\nSummary: ${summary.status}\nHuman approval: PENDING (required)\n`,
+              );
+            }
+            exitCode =
+              result.status === "VERIFIED"
+                ? ExitCode.SUCCESS
+                : ExitCode.EXECUTION_FAILED;
+            return;
+          }
+          const bundles = [];
+          for (const invariantId of SUPPORTED_INVARIANT_IDS) {
+            bundles.push(
+              await generatePassportFromStoredArtifacts(
+                repositoryRoot,
+                invariantId,
+              ),
+            );
+          }
+          const summary = await generateEvidenceSummary(repositoryRoot);
+          const result = {
+            schemaVersion: "1.0.0",
+            status: "GENERATED",
+            evidenceHashes: Object.fromEntries(
+              bundles.map((bundle) => [
+                bundle.passport.invariant.id,
+                bundle.passport.evidenceHash,
+              ]),
+            ),
+            summaryEvidenceHash: summary.summary.evidenceHash,
+            artifacts: summary.paths,
+            humanApprovalRequired: true,
+          } as const;
+          if (commandJsonOption(command)) {
+            writeJson(io, result);
+          } else {
+            io.stdout(
+              `QEDRA aggregate passport generated\nSummary evidence hash: ${result.summaryEvidenceHash}\nHuman approval: PENDING (required)\n`,
+            );
+          }
+          return;
+        }
+        if (options.verify) {
+          const result = await verifyPassportBundle(repositoryRoot, invariant);
+          if (commandJsonOption(command)) {
+            writeJson(io, result);
+          } else {
+            io.stdout(formatPassportVerification(result));
+          }
+          exitCode =
+            result.status === "VERIFIED"
+              ? ExitCode.SUCCESS
+              : ExitCode.EXECUTION_FAILED;
+          return;
+        }
+
+        const generated = await generatePassportFromStoredArtifacts(
+          repositoryRoot,
+          invariant,
+        );
+        const result = {
+          schemaVersion: "1.0.0",
+          status: "GENERATED",
+          evidenceHash: generated.passport.evidenceHash,
+          humanApprovalRequired: generated.passport.humanApprovalRequired,
+          artifacts: generated.paths,
+        } as const;
         if (commandJsonOption(command)) {
           writeJson(io, result);
         } else {
-          io.stdout(formatPassportVerification(result));
+          io.stdout(
+            `QEDRA passport generated\nEvidence hash: ${result.evidenceHash}\nJSON: ${result.artifacts.json}\nHTML: ${result.artifacts.html}\nDashboard: ${result.artifacts.dashboard}\nHuman approval: PENDING (required)\n`,
+          );
         }
-        exitCode =
-          result.status === "VERIFIED"
-            ? ExitCode.SUCCESS
-            : ExitCode.EXECUTION_FAILED;
-        return;
-      }
-
-      const generated =
-        await generatePassportFromStoredArtifacts(repositoryRoot);
-      const result = {
-        schemaVersion: "1.0.0",
-        status: "GENERATED",
-        evidenceHash: generated.passport.evidenceHash,
-        humanApprovalRequired: generated.passport.humanApprovalRequired,
-        artifacts: generated.paths,
-      } as const;
-      if (commandJsonOption(command)) {
-        writeJson(io, result);
-      } else {
-        io.stdout(
-          `QEDRA passport generated\nEvidence hash: ${result.evidenceHash}\nJSON: ${result.artifacts.json}\nHTML: ${result.artifacts.html}\nDashboard: ${result.artifacts.dashboard}\nHuman approval: PENDING (required)\n`,
-        );
-      }
-    });
+      },
+    );
 
   program
     .command("demo")
     .description("run the complete judge-friendly proof loop")
+    .argument("[invariant]", "invariant ID", "TRANSFER_IDEMPOTENCY")
     .option("--replay", "use the deterministic recorded repair", false)
     .option("--live", "use the official Codex SDK live repair", false)
+    .option("--all", "run both financial laws", false)
     .option("--json", "emit one machine-readable JSON document")
     .action(
-      async (options: { replay: boolean; live: boolean }, command: Command) => {
+      async (
+        invariant: string,
+        options: { replay: boolean; live: boolean; all: boolean },
+        command: Command,
+      ) => {
+        requireInvariant(invariant);
         if (options.live && options.replay) {
           throw new Error("Choose either --live or --replay, not both.");
         }
         const repositoryRoot = await findRepositoryRoot();
-        const result = await withProcessCancellation(
-          async (signal) =>
-            await runDemo(
-              repositoryRoot,
-              options.live ? "live" : "record-replay",
-              signal,
-            ),
+        const result = await withProcessCancellation(async (signal) =>
+          options.all
+            ? await runAllDemos(
+                repositoryRoot,
+                options.live ? "live" : "record-replay",
+                signal,
+              )
+            : await runDemo(
+                repositoryRoot,
+                options.live ? "live" : "record-replay",
+                signal,
+                invariant,
+              ),
         );
         if (commandJsonOption(command)) {
           writeJson(io, result);
         } else {
-          io.stdout(formatDemo(result));
+          io.stdout(
+            "laws" in result ? formatAllDemo(result) : formatDemo(result),
+          );
         }
         exitCode =
           result.status === "PASSED"

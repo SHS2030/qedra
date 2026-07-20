@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const CONSTITUTION_SCHEMA_VERSION = "1.0.0" as const;
 export const TRANSFER_IDEMPOTENCY = "TRANSFER_IDEMPOTENCY" as const;
+export const IDEMPOTENCY_KEY_PAYLOAD_BINDING =
+  "IDEMPOTENCY_KEY_PAYLOAD_BINDING" as const;
 
 export const TransferExpectedStateSchema = z
   .object({
@@ -12,6 +14,23 @@ export const TransferExpectedStateSchema = z
   })
   .strict();
 
+export const PayloadBindingExpectedStateSchema = z
+  .object({
+    sourceBalance: z.number().int().nonnegative(),
+    destinationBalance: z.number().int().nonnegative(),
+    alternateDestinationBalance: z.number().int().nonnegative(),
+    ledgerEntries: z.number().int().nonnegative(),
+    conflictStatusCode: z.number().int().min(400).max(499),
+    conflictError: z.literal("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD"),
+    identicalRetryStatusCode: z.literal(200),
+  })
+  .strict();
+
+export const ExpectedStateSchema = z.union([
+  TransferExpectedStateSchema,
+  PayloadBindingExpectedStateSchema,
+]);
+
 export const ScenarioDefinitionSchema = z
   .object({
     id: z.string().min(1),
@@ -20,7 +39,7 @@ export const ScenarioDefinitionSchema = z
     attackCommand: z.string().min(1),
     verificationCommand: z.string().min(1),
     timeoutMs: z.number().int().positive().max(300_000),
-    expectedState: TransferExpectedStateSchema,
+    expectedState: ExpectedStateSchema,
   })
   .strict();
 
@@ -60,12 +79,18 @@ export const ConstitutionSchema = z
   });
 
 export type TransferExpectedState = z.infer<typeof TransferExpectedStateSchema>;
+export type PayloadBindingExpectedState = z.infer<
+  typeof PayloadBindingExpectedStateSchema
+>;
 export type ScenarioDefinition = z.infer<typeof ScenarioDefinitionSchema>;
 export type InvariantDefinition = z.infer<typeof InvariantDefinitionSchema>;
 export type Constitution = z.infer<typeof ConstitutionSchema>;
 
 export const TRANSFER_IDEMPOTENCY_STATEMENT =
   "The same transfer request must never debit a wallet more than once, including after a network timeout, client retry, duplicate callback, or concurrent duplicate request." as const;
+
+export const IDEMPOTENCY_KEY_PAYLOAD_BINDING_STATEMENT =
+  "The same idempotency key must never be accepted for two semantically different transfer requests." as const;
 
 export const DEFAULT_CONSTITUTION: Constitution = ConstitutionSchema.parse({
   schemaVersion: CONSTITUTION_SCHEMA_VERSION,
@@ -96,6 +121,35 @@ export const DEFAULT_CONSTITUTION: Constitution = ConstitutionSchema.parse({
           destinationBalance: 6_000,
           debitEntries: 1,
           creditEntries: 1,
+        },
+      },
+    },
+    {
+      id: IDEMPOTENCY_KEY_PAYLOAD_BINDING,
+      version: 1,
+      title: "Idempotency key payload binding",
+      statement: IDEMPOTENCY_KEY_PAYLOAD_BINDING_STATEMENT,
+      severity: "critical",
+      enabled: true,
+      tags: ["payments", "idempotency", "payload-integrity"],
+      scenario: {
+        id: "idempotency-key-payload-conflict",
+        deterministicSeed: "qedra-idempotency-key-payload-binding-seed-v1",
+        description:
+          "Commit TX-001, then reuse its idempotency key with a different amount, destination, and source.",
+        attackCommand:
+          "node --import tsx packages/cli/src/bin.ts attack IDEMPOTENCY_KEY_PAYLOAD_BINDING --target vulnerable --json",
+        verificationCommand:
+          "node --import tsx packages/cli/src/bin.ts verify IDEMPOTENCY_KEY_PAYLOAD_BINDING --target fixed --json",
+        timeoutMs: 30_000,
+        expectedState: {
+          sourceBalance: 9_000,
+          destinationBalance: 6_000,
+          alternateDestinationBalance: 2_000,
+          ledgerEntries: 2,
+          conflictStatusCode: 409,
+          conflictError: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD",
+          identicalRetryStatusCode: 200,
         },
       },
     },

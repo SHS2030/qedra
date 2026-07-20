@@ -58,6 +58,9 @@ evidence/live-repair.diff
 evidence/passport.json
 evidence/passport.html
 evidence/dashboard/
+evidence/transfer-idempotency/
+evidence/idempotency-key-payload-binding/
+evidence/summary.json
 apps/evidence-dashboard/public/data.json
 .qedra/
 tmp/

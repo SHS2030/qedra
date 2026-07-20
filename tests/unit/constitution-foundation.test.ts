@@ -13,13 +13,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ConstitutionSchema,
   DEFAULT_CONSTITUTION_RELATIVE_PATH,
+  IDEMPOTENCY_KEY_PAYLOAD_BINDING,
   TRANSFER_IDEMPOTENCY,
   findInvariant,
   getInvariant,
   initConstitution,
   loadConstitution,
 } from "../../packages/constitution/src/index.js";
-import { TRANSFER_IDEMPOTENCY_ATTACK } from "../../packages/scenario-engine/src/index.js";
+import {
+  IDEMPOTENCY_KEY_PAYLOAD_BINDING_ATTACK,
+  TRANSFER_IDEMPOTENCY_ATTACK,
+} from "../../packages/scenario-engine/src/index.js";
 
 const temporaryRoots: string[] = [];
 
@@ -60,6 +64,34 @@ describe("QEDRA constitution", () => {
       creditEntries: 1,
     });
     expect(findInvariant(constitution, "UNKNOWN")).toBeUndefined();
+  });
+
+  it("strictly loads IDEMPOTENCY_KEY_PAYLOAD_BINDING", async () => {
+    const constitution = await loadConstitution(
+      resolve(process.cwd(), DEFAULT_CONSTITUTION_RELATIVE_PATH),
+    );
+    const invariant = getInvariant(
+      constitution,
+      IDEMPOTENCY_KEY_PAYLOAD_BINDING,
+    );
+    expect(invariant.statement).toBe(
+      IDEMPOTENCY_KEY_PAYLOAD_BINDING_ATTACK.invariantStatement,
+    );
+    expect(invariant.scenario.id).toBe(
+      IDEMPOTENCY_KEY_PAYLOAD_BINDING_ATTACK.scenarioId,
+    );
+    expect(invariant.scenario.deterministicSeed).toBe(
+      IDEMPOTENCY_KEY_PAYLOAD_BINDING_ATTACK.deterministicSeed,
+    );
+    expect(invariant.scenario.expectedState).toEqual({
+      sourceBalance: 9_000,
+      destinationBalance: 6_000,
+      alternateDestinationBalance: 2_000,
+      ledgerEntries: 2,
+      conflictStatusCode: 409,
+      conflictError: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD",
+      identicalRetryStatusCode: 200,
+    });
   });
 
   it("initializes once and preserves an existing valid file byte-for-byte", async () => {

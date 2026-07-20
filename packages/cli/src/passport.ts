@@ -33,31 +33,36 @@ import {
   readGitMetadata,
   sha256Hex,
 } from "../../shared/src/index.js";
-import type { TransferIdempotencyVerification } from "../../verification-engine/src/index.js";
+import type {
+  IdempotencyKeyPayloadBindingVerification,
+  TransferIdempotencyVerification,
+} from "../../verification-engine/src/index.js";
 
-import {
-  COUNTEREXAMPLE_PATH,
-  readCounterexample,
-  scenarioRunFromCounterexample,
-} from "./counterexample.js";
+import { scenarioRunFromCounterexample } from "./counterexample.js";
 import { runProofLoop, type ProofLoopRun } from "./proof-loop.js";
 import {
-  REPAIR_DIFF_PATH,
-  REPAIR_REPORT_PATH,
-  REPAIR_REQUEST_PATH,
-  RECORDED_CHANGE_SET_PATH,
-  type RepairExecution,
-} from "./repair.js";
+  runPayloadBindingProofLoop,
+  type PayloadBindingProofLoopRun,
+} from "./payload-binding.js";
+import {
+  invariantEvidencePaths,
+  isSupportedInvariantId,
+  type InvariantEvidencePaths,
+  type SupportedInvariantId,
+} from "./evidence-layout.js";
+import { type RepairExecution } from "./repair.js";
 
-export const REPAIR_EVIDENCE_PATH = "evidence/repair-evidence.json" as const;
-export const REPLAY_RESULT_PATH = "evidence/replay-result.json" as const;
+const TRANSFER_EVIDENCE_PATHS = invariantEvidencePaths("TRANSFER_IDEMPOTENCY");
+export const REPAIR_EVIDENCE_PATH = TRANSFER_EVIDENCE_PATHS.repairEvidence;
+export const REPLAY_RESULT_PATH = TRANSFER_EVIDENCE_PATHS.replayResult;
 export const VERIFICATION_RESULT_PATH =
-  "evidence/verification-result.json" as const;
-export const PASSPORT_JSON_PATH = "evidence/passport.json" as const;
-export const PASSPORT_HTML_PATH = "evidence/passport.html" as const;
+  TRANSFER_EVIDENCE_PATHS.verificationResult;
+export const PASSPORT_JSON_PATH = TRANSFER_EVIDENCE_PATHS.passportJson;
+export const PASSPORT_HTML_PATH = TRANSFER_EVIDENCE_PATHS.passportHtml;
 export const LIVE_REPAIR_BLOCKER_PATH =
-  "evidence/live-repair-blocker.json" as const;
-export const DASHBOARD_OUTPUT_PATH = "evidence/dashboard" as const;
+  TRANSFER_EVIDENCE_PATHS.liveRepairBlocker;
+export const DASHBOARD_OUTPUT_PATH =
+  `${TRANSFER_EVIDENCE_PATHS.directory}/dashboard` as const;
 
 interface SignedProofResult extends Record<string, unknown> {
   readonly evidenceHash: string;
@@ -66,16 +71,18 @@ interface SignedProofResult extends Record<string, unknown> {
 export interface PassportGenerationResult {
   readonly passport: Passport;
   readonly repairEvidence: RepairEvidence;
-  readonly replay: ProofLoopRun;
-  readonly verification: ProofLoopRun;
+  readonly replay: SupportedProofLoopRun;
+  readonly verification: SupportedProofLoopRun;
   readonly bundleVerification: PassportVerificationResult;
   readonly paths: {
-    readonly json: typeof PASSPORT_JSON_PATH;
-    readonly html: typeof PASSPORT_HTML_PATH;
+    readonly json: string;
+    readonly html: string;
     readonly dashboard: string;
     readonly liveRepairBlocker: string | null;
   };
 }
+
+export type SupportedProofLoopRun = ProofLoopRun | PayloadBindingProofLoopRun;
 
 export interface PassportVerificationCheck {
   readonly path: string;
@@ -148,6 +155,7 @@ async function createRepairEvidenceArtifact(
   repositoryRoot: string,
   execution: RepairExecution,
   generatedAt: string,
+  paths: InvariantEvidencePaths,
 ): Promise<RepairEvidence> {
   const authentication = await detectOpenAiApiKeyPresence({
     cwd: repositoryRoot,
@@ -157,7 +165,7 @@ async function createRepairEvidenceArtifact(
   const validations = execution.result.validationResults ?? [];
   const requestArtifact = await artifactReference(
     repositoryRoot,
-    REPAIR_REQUEST_PATH,
+    paths.repairRequest,
   );
   const hasDiff = (execution.result.patch?.content.length ?? 0) > 0;
   const liveInvocationAttempted =
@@ -190,7 +198,7 @@ async function createRepairEvidenceArtifact(
     },
     isolation: {
       strategy: "git-worktree",
-      worktreePath: ".qedra/worktrees/transfer-idempotency",
+      worktreePath: paths.worktree,
       baseCommit: execution.request.repository.baseCommit,
     },
     attempts: execution.result.attempts.map((attempt, index) => {
@@ -215,7 +223,7 @@ async function createRepairEvidenceArtifact(
       };
     }),
     diffArtifact: hasDiff
-      ? await artifactReference(repositoryRoot, REPAIR_DIFF_PATH)
+      ? await artifactReference(repositoryRoot, paths.repairDiff)
       : null,
     validation: {
       commands: execution.request.validationCommands.map((validation) =>
@@ -229,15 +237,16 @@ async function createRepairEvidenceArtifact(
     },
     humanApprovalRequired: true,
   });
-  await atomicWriteJson(resolve(repositoryRoot, REPAIR_EVIDENCE_PATH), repair);
+  await atomicWriteJson(resolve(repositoryRoot, paths.repairEvidence), repair);
   return repair;
 }
 
 function proofResultArtifact(
   kind: "qedra.replay" | "qedra.verification",
   counterexample: Counterexample,
-  run: ProofLoopRun,
+  run: SupportedProofLoopRun,
   generatedAt: string,
+  counterexamplePath: string,
 ): SignedProofResult {
   return addEvidenceHash({
     schemaVersion: "1.0.0",
@@ -245,7 +254,7 @@ function proofResultArtifact(
     generatedAt,
     invariant: counterexample.invariant,
     sourceCounterexample: {
-      path: COUNTEREXAMPLE_PATH,
+      path: counterexamplePath,
       evidenceHash: counterexample.evidenceHash,
     },
     scenario: {
@@ -267,6 +276,7 @@ function proofResultArtifact(
 async function writeLiveBlocker(
   repositoryRoot: string,
   generatedAt: string,
+  paths: InvariantEvidencePaths,
 ): Promise<string | null> {
   const authentication = await detectOpenAiApiKeyPresence({
     cwd: repositoryRoot,
@@ -290,10 +300,10 @@ async function writeLiveBlocker(
     deterministicReplayAvailable: true,
   });
   await atomicWriteJson(
-    resolve(repositoryRoot, LIVE_REPAIR_BLOCKER_PATH),
+    resolve(repositoryRoot, paths.liveRepairBlocker),
     blocker,
   );
-  return LIVE_REPAIR_BLOCKER_PATH;
+  return paths.liveRepairBlocker;
 }
 
 function aggregateTokenMetric(
@@ -318,6 +328,18 @@ export async function generatePassport(
   execution: RepairExecution,
   durationMs: number | null = null,
 ): Promise<PassportGenerationResult> {
+  if (!isSupportedInvariantId(counterexample.invariant.id)) {
+    throw new Error(
+      `Unsupported passport invariant: ${counterexample.invariant.id}`,
+    );
+  }
+  const invariantId = counterexample.invariant.id;
+  if (execution.request.invariant.id !== invariantId) {
+    throw new Error(
+      "The repair execution belongs to a different invariant than the counterexample.",
+    );
+  }
+  const paths = invariantEvidencePaths(invariantId);
   if (execution.result.status !== "SUCCEEDED") {
     throw new Error(
       `A verified passport requires a successful repair; received ${execution.result.status}.`,
@@ -325,8 +347,18 @@ export async function generatePassport(
   }
   const generatedAt = new Date().toISOString();
   const recordedScenario = scenarioRunFromCounterexample(counterexample);
-  const replay = await runProofLoop(repositoryRoot, "fixed", recordedScenario);
-  const verification = await runProofLoop(repositoryRoot, "fixed");
+  const replay =
+    invariantId === "TRANSFER_IDEMPOTENCY"
+      ? await runProofLoop(repositoryRoot, "fixed", recordedScenario)
+      : await runPayloadBindingProofLoop(
+          repositoryRoot,
+          "fixed",
+          recordedScenario,
+        );
+  const verification =
+    invariantId === "TRANSFER_IDEMPOTENCY"
+      ? await runProofLoop(repositoryRoot, "fixed")
+      : await runPayloadBindingProofLoop(repositoryRoot, "fixed");
   if (
     !replay.verification.passed ||
     replay.scenario.attackRequestHash !==
@@ -347,19 +379,21 @@ export async function generatePassport(
     counterexample,
     replay,
     generatedAt,
+    paths.counterexample,
   );
   const verificationArtifact = proofResultArtifact(
     "qedra.verification",
     counterexample,
     verification,
     generatedAt,
+    paths.counterexample,
   );
   await atomicWriteJson(
-    resolve(repositoryRoot, REPLAY_RESULT_PATH),
+    resolve(repositoryRoot, paths.replayResult),
     replayArtifact,
   );
   await atomicWriteJson(
-    resolve(repositoryRoot, VERIFICATION_RESULT_PATH),
+    resolve(repositoryRoot, paths.verificationResult),
     verificationArtifact,
   );
 
@@ -367,18 +401,23 @@ export async function generatePassport(
     repositoryRoot,
     execution,
     generatedAt,
+    paths,
   );
-  const liveBlockerPath = await writeLiveBlocker(repositoryRoot, generatedAt);
+  const liveBlockerPath = await writeLiveBlocker(
+    repositoryRoot,
+    generatedAt,
+    paths,
+  );
   const artifactPaths = [
     "constitutions/qedra.yaml",
-    COUNTEREXAMPLE_PATH,
-    REPAIR_REQUEST_PATH,
-    REPAIR_REPORT_PATH,
-    REPAIR_DIFF_PATH,
-    ...(execution.changeSet === undefined ? [] : [RECORDED_CHANGE_SET_PATH]),
-    REPAIR_EVIDENCE_PATH,
-    REPLAY_RESULT_PATH,
-    VERIFICATION_RESULT_PATH,
+    paths.counterexample,
+    paths.repairRequest,
+    paths.repairReport,
+    paths.repairDiff,
+    ...(execution.changeSet === undefined ? [] : [paths.recordedChangeSet]),
+    paths.repairEvidence,
+    paths.replayResult,
+    paths.verificationResult,
     ...(liveBlockerPath === null ? [] : [liveBlockerPath]),
   ];
   const artifacts = await Promise.all(
@@ -430,34 +469,34 @@ export async function generatePassport(
     },
     attack: {
       status: "FAIL",
-      command: "qedra attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
+      command: `qedra attack ${invariantId} --target vulnerable --json`,
       completedAt: counterexample.generatedAt,
-      artifact: await artifactReference(repositoryRoot, COUNTEREXAMPLE_PATH),
+      artifact: await artifactReference(repositoryRoot, paths.counterexample),
     },
     repair: repairEvidence,
     replay: {
       status: "PASS",
-      command: "qedra demo --replay --json",
+      command: `qedra demo ${invariantId} --replay --json`,
       completedAt: generatedAt,
-      artifact: await artifactReference(repositoryRoot, REPLAY_RESULT_PATH),
+      artifact: await artifactReference(repositoryRoot, paths.replayResult),
     },
     verification: {
       status: "PASS",
-      command: "qedra verify TRANSFER_IDEMPOTENCY --target fixed --json",
+      command: `qedra verify ${invariantId} --target fixed --json`,
       completedAt: generatedAt,
       artifact: await artifactReference(
         repositoryRoot,
-        VERIFICATION_RESULT_PATH,
+        paths.verificationResult,
       ),
     },
     artifacts,
     reproductionCommands: [
       "pnpm install --frozen-lockfile",
       "node --import tsx packages/cli/src/bin.ts doctor --json",
-      "node --import tsx packages/cli/src/bin.ts attack TRANSFER_IDEMPOTENCY --target vulnerable --json",
-      "node --import tsx packages/cli/src/bin.ts repair TRANSFER_IDEMPOTENCY --replay --json",
-      "node --import tsx packages/cli/src/bin.ts demo --replay --json",
-      "node --import tsx packages/cli/src/bin.ts passport --verify --json",
+      `node --import tsx packages/cli/src/bin.ts attack ${invariantId} --target vulnerable --json`,
+      `node --import tsx packages/cli/src/bin.ts repair ${invariantId} --replay --json`,
+      `node --import tsx packages/cli/src/bin.ts demo ${invariantId} --replay --json`,
+      `node --import tsx packages/cli/src/bin.ts passport ${invariantId} --verify --json`,
     ],
     metrics: {
       durationMs,
@@ -475,27 +514,33 @@ export async function generatePassport(
     humanApprovalRequired: true,
   });
   await writePassportArtifacts(passport, {
-    jsonPath: resolve(repositoryRoot, PASSPORT_JSON_PATH),
-    htmlPath: resolve(repositoryRoot, PASSPORT_HTML_PATH),
+    jsonPath: resolve(repositoryRoot, paths.passportJson),
+    htmlPath: resolve(repositoryRoot, paths.passportHtml),
   });
-  const bundleVerification = await verifyPassportBundle(repositoryRoot);
+  const bundleVerification = await verifyPassportBundle(
+    repositoryRoot,
+    invariantId,
+  );
   if (bundleVerification.status !== "VERIFIED") {
     throw new Error(
       "The generated evidence passport or one of its linked repair artifacts failed integrity verification.",
     );
   }
-  await generateEvidenceDashboard(
-    {
-      counterexample,
-      repair: repairEvidence,
-      passport,
-      bundleVerification,
-    },
-    {
-      repositoryRoot,
-      outputDirectory: resolve(repositoryRoot, DASHBOARD_OUTPUT_PATH),
-    },
-  );
+  const dashboardPath = `${paths.directory}/dashboard/index.html`;
+  if (invariantId === "TRANSFER_IDEMPOTENCY") {
+    await generateEvidenceDashboard(
+      {
+        counterexample,
+        repair: repairEvidence,
+        passport,
+        bundleVerification,
+      },
+      {
+        repositoryRoot,
+        outputDirectory: resolve(repositoryRoot, paths.directory, "dashboard"),
+      },
+    );
+  }
   return {
     passport,
     repairEvidence,
@@ -503,9 +548,12 @@ export async function generatePassport(
     verification,
     bundleVerification,
     paths: {
-      json: PASSPORT_JSON_PATH,
-      html: PASSPORT_HTML_PATH,
-      dashboard: `${DASHBOARD_OUTPUT_PATH}/index.html`,
+      json: paths.passportJson,
+      html: paths.passportHtml,
+      dashboard:
+        invariantId === "TRANSFER_IDEMPOTENCY"
+          ? dashboardPath
+          : paths.passportHtml,
       liveRepairBlocker: liveBlockerPath,
     },
   };
@@ -611,7 +659,19 @@ async function assertStoredRepairLinks(
   request: RepairRequest,
   result: RepairResult,
   changeSet: RecordedChangeSet | undefined,
+  invariantId: SupportedInvariantId,
+  paths: InvariantEvidencePaths,
 ): Promise<void> {
+  if (
+    request.invariant.id !== invariantId ||
+    request.scenario.counterexampleArtifactPath !== paths.counterexample ||
+    request.repository.isolatedWorktreePath !==
+      resolve(repositoryRoot, paths.worktree)
+  ) {
+    throw new Error(
+      "The stored repair request is outside its invariant evidence boundary.",
+    );
+  }
   if (request.requestId !== result.requestId || request.mode !== result.mode) {
     throw new Error("Stored repair request and report do not belong together.");
   }
@@ -619,7 +679,7 @@ async function assertStoredRepairLinks(
     readFile(
       resolve(repositoryRoot, request.scenario.counterexampleArtifactPath),
     ),
-    readFile(resolve(repositoryRoot, REPAIR_DIFF_PATH), "utf8"),
+    readFile(resolve(repositoryRoot, paths.repairDiff), "utf8"),
   ]);
   if (
     sha256Hex(counterexampleBytes) !== request.scenario.counterexampleSha256
@@ -631,6 +691,11 @@ async function assertStoredRepairLinks(
   const counterexample = parseAndVerifyCounterexample(
     JSON.parse(counterexampleBytes.toString("utf8")) as unknown,
   );
+  scenarioRunFromCounterexample(counterexample);
+  const expectedTargetId =
+    invariantId === "TRANSFER_IDEMPOTENCY"
+      ? "vulnerable-wallet-api"
+      : "vulnerable-payload-binding-wallet-api";
   if (
     counterexample.invariant.id !== request.invariant.id ||
     counterexample.invariant.statement !== request.invariant.statement ||
@@ -639,6 +704,7 @@ async function assertStoredRepairLinks(
       request.scenario.deterministicSeed ||
     counterexample.reproductionCommand !==
       request.scenario.reproductionCommand ||
+    counterexample.scenario.targetId !== expectedTargetId ||
     counterexample.repository.commit !== request.repository.baseCommit
   ) {
     throw new Error(
@@ -722,10 +788,12 @@ async function assertStoredRepairLinks(
 
 export async function readStoredRepairExecution(
   repositoryRoot: string,
+  invariantId: SupportedInvariantId = "TRANSFER_IDEMPOTENCY",
 ): Promise<RepairExecution> {
+  const paths = invariantEvidencePaths(invariantId);
   const [requestSource, resultSource] = await Promise.all([
-    readFile(resolve(repositoryRoot, REPAIR_REQUEST_PATH), "utf8"),
-    readFile(resolve(repositoryRoot, REPAIR_REPORT_PATH), "utf8"),
+    readFile(resolve(repositoryRoot, paths.repairRequest), "utf8"),
+    readFile(resolve(repositoryRoot, paths.repairReport), "utf8"),
   ]);
   const request: unknown = JSON.parse(requestSource);
   const result: unknown = JSON.parse(resultSource);
@@ -734,14 +802,21 @@ export async function readStoredRepairExecution(
   let changeSet: RecordedChangeSet | undefined;
   if (request.mode === "record-replay") {
     const source = await readFile(
-      resolve(repositoryRoot, RECORDED_CHANGE_SET_PATH),
+      resolve(repositoryRoot, paths.recordedChangeSet),
       "utf8",
     );
     const value: unknown = JSON.parse(source);
     assertStoredChangeSet(value);
     changeSet = value;
   }
-  await assertStoredRepairLinks(repositoryRoot, request, result, changeSet);
+  await assertStoredRepairLinks(
+    repositoryRoot,
+    request,
+    result,
+    changeSet,
+    invariantId,
+    paths,
+  );
   return {
     request,
     result,
@@ -751,33 +826,62 @@ export async function readStoredRepairExecution(
 
 export async function generatePassportFromStoredArtifacts(
   repositoryRoot: string,
+  invariantId: SupportedInvariantId = "TRANSFER_IDEMPOTENCY",
 ): Promise<PassportGenerationResult> {
+  const paths = invariantEvidencePaths(invariantId);
   const [counterexample, execution] = await Promise.all([
-    readCounterexample(repositoryRoot),
-    readStoredRepairExecution(repositoryRoot),
+    readFile(resolve(repositoryRoot, paths.counterexample), "utf8").then(
+      (source) => parseAndVerifyCounterexample(JSON.parse(source) as unknown),
+    ),
+    readStoredRepairExecution(repositoryRoot, invariantId),
   ]);
+  if (counterexample.invariant.id !== invariantId) {
+    throw new Error("Stored counterexample belongs to a different invariant.");
+  }
   return await generatePassport(repositoryRoot, counterexample, execution);
 }
 
-function validateArtifactDocument(path: string, source: string): boolean {
+function validateArtifactDocument(
+  path: string,
+  source: string,
+  invariantId: SupportedInvariantId,
+  paths: InvariantEvidencePaths,
+): boolean {
   const value: unknown = JSON.parse(source);
-  if (path === COUNTEREXAMPLE_PATH) {
-    parseAndVerifyCounterexample(value);
-  } else if (path === REPAIR_REQUEST_PATH) {
+  if (path === paths.counterexample) {
+    const counterexample = parseAndVerifyCounterexample(value);
+    return counterexample.invariant.id === invariantId;
+  } else if (path === paths.repairRequest) {
     assertStoredRepairRequest(value);
-  } else if (path === REPAIR_REPORT_PATH) {
+    return value.invariant.id === invariantId;
+  } else if (path === paths.repairReport) {
     assertStoredRepairResult(value);
-  } else if (path === RECORDED_CHANGE_SET_PATH) {
+  } else if (path === paths.recordedChangeSet) {
     assertStoredChangeSet(value);
-  } else if (path === REPAIR_EVIDENCE_PATH) {
-    parseAndVerifyRepairEvidence(value);
+    return value.invariantId === invariantId;
+  } else if (path === paths.repairEvidence) {
+    return parseAndVerifyRepairEvidence(value).invariant.id === invariantId;
   } else if (
-    path === REPLAY_RESULT_PATH ||
-    path === VERIFICATION_RESULT_PATH ||
-    path === LIVE_REPAIR_BLOCKER_PATH
+    path === paths.replayResult ||
+    path === paths.verificationResult ||
+    path === paths.liveRepairBlocker
   ) {
     if (!verifyEvidenceHash(value)) {
       return false;
+    }
+    if (path !== paths.liveRepairBlocker) {
+      if (
+        !isRecord(value) ||
+        !isRecord(value.invariant) ||
+        value.invariant.id !== invariantId ||
+        !isRecord(value.sourceCounterexample) ||
+        value.sourceCounterexample.path !== paths.counterexample ||
+        !isRecord(value.scenario) ||
+        value.scenario.exactRequestHashMatched !== true ||
+        value.status !== "PASSED"
+      ) {
+        return false;
+      }
     }
   }
   return true;
@@ -785,13 +889,38 @@ function validateArtifactDocument(path: string, source: string): boolean {
 
 export async function verifyPassportBundle(
   repositoryRoot: string,
+  invariantId: SupportedInvariantId = "TRANSFER_IDEMPOTENCY",
 ): Promise<PassportVerificationResult> {
+  const paths = invariantEvidencePaths(invariantId);
   try {
     const source = await readFile(
-      resolve(repositoryRoot, PASSPORT_JSON_PATH),
+      resolve(repositoryRoot, paths.passportJson),
       "utf8",
     );
     const passport = parseAndVerifyPassport(JSON.parse(source) as unknown);
+    if (passport.invariant.id !== invariantId) {
+      throw new Error("Passport belongs to a different invariant.");
+    }
+    if (
+      passport.attack.artifact?.path !== paths.counterexample ||
+      passport.repair.invariant.id !== invariantId ||
+      passport.repair.requestArtifact.path !== paths.repairRequest ||
+      passport.replay.artifact?.path !== paths.replayResult ||
+      passport.verification.artifact?.path !== paths.verificationResult
+    ) {
+      throw new Error("Passport phase links cross an invariant boundary.");
+    }
+    const artifactPathSet = new Set(passport.artifacts.map(({ path }) => path));
+    if (
+      artifactPathSet.size !== passport.artifacts.length ||
+      passport.artifacts.some(
+        ({ path }) =>
+          path !== "constitutions/qedra.yaml" &&
+          !path.startsWith(`${paths.directory}/`),
+      )
+    ) {
+      throw new Error("Passport references a cross-invariant artifact.");
+    }
     const checks: PassportVerificationCheck[] = [];
     for (const artifact of passport.artifacts) {
       try {
@@ -802,6 +931,8 @@ export async function verifyPassportBundle(
           documentValid = validateArtifactDocument(
             artifact.path,
             bytes.toString("utf8"),
+            invariantId,
+            paths,
           );
         }
         checks.push({
@@ -820,23 +951,47 @@ export async function verifyPassportBundle(
       }
     }
     const htmlSource = await readFile(
-      resolve(repositoryRoot, PASSPORT_HTML_PATH),
+      resolve(repositoryRoot, paths.passportHtml),
       "utf8",
     );
     const htmlMatches = htmlSource === renderPassportHtml(passport);
     let repairArtifactsValid = false;
     try {
-      const execution = await readStoredRepairExecution(repositoryRoot);
-      const requiredPaths: string[] = [REPAIR_REQUEST_PATH, REPAIR_REPORT_PATH];
+      const execution = await readStoredRepairExecution(
+        repositoryRoot,
+        invariantId,
+      );
+      if (
+        passport.repository.commit !== execution.request.repository.baseCommit
+      ) {
+        throw new Error(
+          "Passport repository commit differs from the repair base commit.",
+        );
+      }
+      const requiredPaths: string[] = [
+        paths.counterexample,
+        paths.repairRequest,
+        paths.repairReport,
+        paths.repairEvidence,
+        paths.replayResult,
+        paths.verificationResult,
+      ];
       if (execution.result.patch !== undefined) {
-        requiredPaths.push(REPAIR_DIFF_PATH);
+        requiredPaths.push(paths.repairDiff);
       }
       if (execution.changeSet !== undefined) {
-        requiredPaths.push(RECORDED_CHANGE_SET_PATH);
+        requiredPaths.push(paths.recordedChangeSet);
       }
       repairArtifactsValid = requiredPaths.every((path) =>
         passport.artifacts.some((artifact) => artifact.path === path),
       );
+      const standaloneRepair = parseAndVerifyRepairEvidence(
+        JSON.parse(
+          await readFile(resolve(repositoryRoot, paths.repairEvidence), "utf8"),
+        ) as unknown,
+      );
+      repairArtifactsValid &&=
+        JSON.stringify(standaloneRepair) === JSON.stringify(passport.repair);
     } catch {
       repairArtifactsValid = false;
     }
@@ -869,8 +1024,23 @@ export async function verifyPassportBundle(
 }
 
 export function proofSummary(
-  verification: TransferIdempotencyVerification,
+  verification:
+    | TransferIdempotencyVerification
+    | IdempotencyKeyPayloadBindingVerification,
 ): Readonly<Record<string, unknown>> {
+  if (verification.invariantId === "IDEMPOTENCY_KEY_PAYLOAD_BINDING") {
+    return {
+      status: verification.status,
+      balances: verification.actual.balances,
+      ledgerEntries: verification.actual.ledgerEntries,
+      amountConflictStatus: verification.actual.amountConflictStatus,
+      destinationConflictStatus: verification.actual.destinationConflictStatus,
+      sourceConflictStatus: verification.actual.sourceConflictStatus,
+      conflictError: verification.actual.amountConflictError,
+      identicalRetryMatchesInitialResult:
+        verification.actual.identicalRetryMatchesInitialResult,
+    };
+  }
   return {
     status: verification.status,
     balances: verification.actual.balances,

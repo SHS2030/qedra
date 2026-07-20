@@ -12,8 +12,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "node scripts/clean.mjs",
-    "demo": "tsx packages/cli/src/bin.ts demo --replay",
-    "evidence:verify": "tsx packages/cli/src/bin.ts passport --verify --json",
+    "demo": "tsx packages/cli/src/bin.ts demo --all --replay",
+    "evidence:verify": "tsx packages/cli/src/bin.ts passport --all --verify --json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
