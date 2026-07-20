@@ -356,5 +356,7 @@ The community core is Apache-2.0 and includes constitutions, deterministic attac
 ## License
 
 QEDRA community core is licensed under the [Apache License 2.0](LICENSE).
+
 ## Built with Codex and GPT-5.6
+
 See [Build Week engineering notes](docs/build-with-codex-gpt-5.6.md) for how Codex and GPT-5.6 were used, the human decisions, and the reproducible judge path.
